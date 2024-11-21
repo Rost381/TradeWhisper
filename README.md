@@ -44,7 +44,7 @@ And now we'll increase the trading balance to **50 USDT** and extend the trading
 
 The model showed a minimum value of **46.5 USDT**, which isn't critical; however, it indicates that the model "consumed" data containing noise or false signals. There were quite a few such moments during the development phase, and while these patterns on the graphs were initially discouraging, they didn't stop me from continuing development.
 
-The problem was clear, and I integrated the Optuna library for hyperparameter optimization. This allowed for filtering out irrelevant data and improving the model's overall performance. Hyperparameter optimization helps the model better adapt to market conditions, reducing the probability of errors and increasing trading efficiency.
+The problem was clear, and I integrated the **Optuna library** for hyperparameter optimization. This allowed for filtering out irrelevant data and improving the model's overall performance. Hyperparameter optimization helps the model better adapt to market conditions, reducing the probability of errors and increasing trading efficiency.
 
 This translation captures the technical aspects while maintaining the narrative of continuous improvement and problem-solving approach, especially highlighting the implementation of Optuna for optimization, which is a crucial development step in machine learning-based trading systems.
 
