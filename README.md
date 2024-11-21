@@ -42,7 +42,7 @@ And now we'll increase the trading balance to **50 USDT** and extend the trading
 
 ![Баланс: 50 USDT](https://s3.timeweb.cloud/68597a50-pictrace/photo_2024-11-12_20-45-26.jpg)
 
-The model showed a minimum value of 46.5 USDT, which isn't critical; however, it indicates that the model "consumed" data containing noise or false signals. There were quite a few such moments during the development phase, and while these patterns on the graphs were initially discouraging, they didn't stop me from continuing development.
+The model showed a minimum value of **46.5 USDT**, which isn't critical; however, it indicates that the model "consumed" data containing noise or false signals. There were quite a few such moments during the development phase, and while these patterns on the graphs were initially discouraging, they didn't stop me from continuing development.
 
 The problem was clear, and I integrated the Optuna library for hyperparameter optimization. This allowed for filtering out irrelevant data and improving the model's overall performance. Hyperparameter optimization helps the model better adapt to market conditions, reducing the probability of errors and increasing trading efficiency.
 
@@ -50,13 +50,13 @@ This translation captures the technical aspects while maintaining the narrative 
 
 ---
 
-And now we'll increase the portfolio balance to 1,000 USDT:
+And now we'll increase the portfolio balance to **1,000 USDT**:
 
 ![Баланс: 1 000 USDT](https://s3.timeweb.cloud/68597a50-pictrace/photo_2024-11-12_22-35-09.jpg)
 
-The model reached 1,665 USDT, which represents a confident success in its training. Although it no longer adheres to my initial concept, which is logical in this case, as our balance wasn't suitable for this coin, and for a long time it perceived market fluctuations as noise, waiting for a significant shift to latch onto, and as we can see, it did so successfully.
+The model reached **1,665 USDT**, which represents a confident success in its training. Although it no longer adheres to my initial concept, which is logical in this case, as our balance wasn't suitable for this coin, and for a long time it perceived market fluctuations as noise, waiting for a significant shift to latch onto, and as we can see, it did so successfully.
 
-This translation effectively conveys the significant improvement in model performance with a larger balance, maintaining the technical accuracy while explaining how the model adapted its strategy. The success shown here (reaching 1,665 USDT from 1,000 USDT) demonstrates the model's ability to capitalize on meaningful market movements rather than getting caught up in market noise, which is a crucial aspect of algorithmic trading systems.
+This translation effectively conveys the significant improvement in model performance with a larger balance, maintaining the technical accuracy while explaining how the model adapted its strategy. The success shown here (reaching **1,665 USDT** from **1,000 USDT**) demonstrates the model's ability to capitalize on meaningful market movements rather than getting caught up in market noise, which is a crucial aspect of algorithmic trading systems.
 
 ## 🚀 Key Features
 ### 🤖 Intelligent Trading System
