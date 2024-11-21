@@ -1,6 +1,6 @@
 # TradeWhisper 🚀
 
-![Logo](https://s3.timeweb.cloud/68597a50-pictrace/photo_2024-11-12_22-35-09.jpg)
+<img src="https://github.com/Solrikk/TradeWhisper/blob/main/assets/6c7b8280-6fdd-11e9-886e-8978ffd3ee82.jpg" width="600" alt="TradeWhisperer Logo">
 
 <div align="center">
   <h3>
