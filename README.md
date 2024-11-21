@@ -28,13 +28,26 @@
 
 Before diving into the development process, I would like to present examples of test run results with different balances using **stable_baselines3**. These examples demonstrate how the model's effectiveness varies depending on the initial capital and testing duration.
 
-For the initial tests, I chose the meme coin **Doge**, assuming that low-cap coins would have minimal impact on the overall portfolio. The tests were conducted with a minimum balance of 10 USDT to evaluate the model's behavior with small investments.
+For the initial tests, I chose the meme coin **Doge**, assuming that low-cap coins would have minimal impact on the overall portfolio. The tests were conducted with a minimum balance of **10 USDT** to evaluate the model's behavior with small investments.
 
 ![Баланс: 10 USDT](https://s3.timeweb.cloud/68597a50-pictrace/photo_2024-11-12_03-23-43.jpg)
 
 The results showed that the maximum value reached **10.25 USDT**. Despite minimal growth, the model didn't trade at a loss, which can already be considered a success, although it didn't achieve its intended goal. However, considering that the model only trained for a couple of dozen minutes to capture the trading pattern, this is understandable.
 
 Furthermore, with further hyperparameter improvements and strategy optimization, significant profits can be expected over several hours of trading. It's important to emphasize again that the absence of losses at such a balance is rather a positive indicator, demonstrating the model's ability to avoid adverse market conditions.
+
+---
+
+And now we'll increase the trading balance to **50 USDT** and extend the trading data by a couple of days:
+
+![Баланс: 50 USDT](https://s3.timeweb.cloud/68597a50-pictrace/photo_2024-11-12_20-45-26.jpg)
+
+The model showed a minimum value of 46.5 USDT, which isn't critical; however, it indicates that the model "consumed" data containing noise or false signals. There were quite a few such moments during the development phase, and while these patterns on the graphs were initially discouraging, they didn't stop me from continuing development.
+
+The problem was clear, and I integrated the Optuna library for hyperparameter optimization. This allowed for filtering out irrelevant data and improving the model's overall performance. Hyperparameter optimization helps the model better adapt to market conditions, reducing the probability of errors and increasing trading efficiency.
+
+This translation captures the technical aspects while maintaining the narrative of continuous improvement and problem-solving approach, especially highlighting the implementation of Optuna for optimization, which is a crucial development step in machine learning-based trading systems.
+
 
 ## 🚀 Key Features
 ### 🤖 Intelligent Trading System
