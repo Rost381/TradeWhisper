@@ -1,0 +1,10 @@
+numpy
+pandas
+swig
+gymnasium
+ccxt
+stable-baselines3
+ta
+python-dotenv
+optuna
+torch
