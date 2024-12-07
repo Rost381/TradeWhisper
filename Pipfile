@@ -1,0 +1,21 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+numpy = "*"
+pandas = "*"
+swig = "*"
+gymnasium = "*"
+ccxt = "*"
+stable-baselines3 = "*"
+ta = "*"
+python-dotenv = "*"
+optuna = "*"
+torch = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.12"

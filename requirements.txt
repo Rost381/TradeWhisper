@@ -8,3 +8,4 @@ ta
 python-dotenv
 optuna
 torch
+tensorboard
