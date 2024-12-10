@@ -46,9 +46,17 @@ logging.basicConfig(
 
 )
 
-API_KEY = os.getenv("API_KEY", "TAHqn***xGhVmof2E")
-API_SECRET = os.getenv("API_SECRET", "0QVQhcRx6SP1uZ****BJDIiQKqN1")
+TRADE_MODE = os.getenv("TRADE_MODE")
+if TRADE_MODE == "LIVE":
+    API_KEY = os.getenv("API_KEY", "TAHqn***xGhVmof2E")
+    API_SECRET = os.getenv("API_SECRET", "0QVQhcRx6SP1uZ****BJDIiQKqN1")
+else:
+    API_KEY = os.getenv("API_KEY_DEMO", "TAHqn***xGhVmof2E")
+    API_SECRET = os.getenv("API_SECRET_DEMO", "0QVQhcRx6SP1uZ****BJDIiQKqN1")
 
+
+# print(API_KEY,API_SECRET)
+# input("Is it correct?")
 
 ADD_LOGS = os.getenv("ADD_LOGS")
 DATA_DIR = os.getenv("DATA_DIR")
@@ -65,6 +73,7 @@ exchange_config = {
     },
     'timeout': 30000
 }
+
 
 class TradingEnvironment(gym.Env):
     def __init__(self, data, norm_params=None, initial_balance=10, risk_percentage=0.7, short_term_threshold=10, long_term_threshold=50, history_size=100, window_size=20):
@@ -301,6 +310,7 @@ class TradingEnvironment(gym.Env):
         self.units = 0
         return reward
 
+
 def calculate_rvi(df, window=10):
     close_open = df['close'] - df['open']
     high_low = df['high'] - df['low']
@@ -340,7 +350,9 @@ def add_technical_indicators(df):
     logging.debug("Технические индикаторы добавлены")
     return df
 
-async def get_full_data(exchange, symbol, timeframe='5m', since=None, limit=2000):  # Изменено с '1m' на '5m'
+
+# Original fn
+"""async def get_full_data(exchange, symbol, timeframe='5m', since=None, limit=2016):  # Изменено с '1m' на '5m'
     all_ohlcv = []
     logging.info(f"Начало получения данных для символа {symbol}")
     while True:
@@ -361,10 +373,135 @@ async def get_full_data(exchange, symbol, timeframe='5m', since=None, limit=2000
     df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     logging.info(f"Получено {len(df)} записей данных для символа {symbol}")
-    print(symbol.split("/")[0])
-    df.to_csv(f"{DATA_DIR}_{timeframe}/DOGE.csv")
-    input("Продолжить ?")
-    return df
+    return df"""
+
+
+async def is_continue(exchange):
+    user_choice = input("Продолжить ? (Y/n): ")
+    if user_choice in ["n", " N", "т", "Т"]:
+        try:
+            for task in asyncio.all_tasks():
+                task.cancel()
+            await exchange.close()
+        except:
+            pass
+        sys.exit(0)
+
+
+# New fn with save df
+async def get_full_data(exchange, symbol, timeframe="5m", since=None, limit=2016):
+    return_limit = limit # Количество возврашаемых свечей
+    all_ohlcv = []
+    logging.info(f"Начало получения данных для символа {symbol}")
+
+    # Формирование имени файла
+    symbol_filename = symbol.split("/")
+    symbol_filename = symbol_filename[0] + symbol_filename[1][:4] + ".csv"
+    file_path = f"{DATA_DIR}_{timeframe}/{symbol_filename}"
+
+    # Создание директории, если её нет
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+    # Определение интервала в миллисекундах
+    interval_ms = {
+        "1m": 60 * 1000,
+        "5m": 5 * 60 * 1000,
+        "15m": 15 * 60 * 1000,
+        "1h": 60 * 60 * 1000,
+        "1d": 24 * 60 * 60 * 1000,
+    }.get(
+        timeframe, 5 * 60 * 1000
+    )  # По умолчанию 5 минут
+
+    # Проверка существования файла и загрузка существующих данных
+    if os.path.exists(file_path):
+        logging.info(f"Файл {file_path} найден. Загрузка существующих данных.")
+        df = pd.read_csv(file_path)
+
+        # Преобразуем столбец timestamp: строки в datetime, числа остаются как есть
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+
+        # Для строковых дат конвертируем их в миллисекунды
+        df["timestamp"] = df["timestamp"].apply(
+            lambda x: int(x.timestamp() * 1000) if not pd.isnull(x) else np.nan
+        )
+
+        # Убедимся, что нет пропущенных значений
+        df = df.dropna(subset=["timestamp"])
+
+        # Преобразуем timestamp в целочисленный тип
+        df["timestamp"] = df["timestamp"].astype(np.int64)
+
+        # Получаем временную метку последней записи
+        since = df["timestamp"].iloc[-1] + 1
+
+        # Проверка, нужно ли увеличить limit, чтобы покрыть весь пропущенный интервал
+        now = exchange.milliseconds()
+        logging.info(
+            f"Текущее время на бирже: {pd.to_datetime(now, unit='ms', utc=True)}"
+        )
+        since = now - (limit * interval_ms)
+        missing_data_points = (now - since) // interval_ms
+        if missing_data_points > limit:
+            logging.info(
+                f"Пропущенный интервал превышает limit ({limit}). Увеличение limit до {missing_data_points}."
+            )
+            limit = missing_data_points
+
+        all_ohlcv = df[
+            ["timestamp", "open", "high", "low", "close", "volume"]
+        ].values.tolist()
+    else:
+        logging.info(f"Файл {file_path} не найден. Будет создан новый файл.")
+        # Если файл не существует, вычисляем since на основе limit
+        now = exchange.milliseconds()
+        logging.info(
+            f"Текущее время на бирже: {pd.to_datetime(now, unit='ms', utc=True)}"
+        )
+        since = now - (limit * interval_ms)
+
+    # Получение новых данных порциями по 900 записей
+    while True:
+        try:
+            fetch_limit = 900 # min(1000, limit - len(all_ohlcv))
+            ohlcv = await exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=fetch_limit)
+            
+            if not ohlcv:
+                logging.debug("Нет новых данных для загрузки")
+                break
+
+            all_ohlcv.extend(ohlcv)
+            last_timestamp = ohlcv[-1][0]
+
+            # Обновляем since для следующего запроса
+            since = last_timestamp + interval_ms
+
+            # Проверяем, достигли ли текущего момента времени
+            if last_timestamp + interval_ms >= exchange.milliseconds():
+                logging.debug("Достигнут конец доступных данных на бирже")
+                break
+
+        except Exception as e:
+            logging.error(f"Ошибка при получении данных: {e}")
+            break
+
+    # Создание DataFrame и сохранение данных в файл
+    df = pd.DataFrame(
+        all_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
+    )
+
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+    df.drop_duplicates(subset="timestamp", keep="last", inplace=True)
+    df.sort_values(by="timestamp", inplace=True)
+
+    df.to_csv(file_path, index=False)
+    logging.info(f"Данные сохранены в файл {file_path}. Всего записей: {len(df)}")
+
+    # Возвращаем последние 'limit' записей
+    print(return_limit)
+    await is_continue(exchange)
+    return df.tail(return_limit)
+
 
 async def list_available_symbols(exchange):
     try:
@@ -692,7 +829,15 @@ async def main():
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, shutdown_handler)
     async_exchange = ccxt_async.bybit(exchange_config)
-    async_exchange.enable_demo_trading(True)  # Включаем режим демо-счета
+    if TRADE_MODE == "DEMO":
+        async_exchange.enable_demo_trading(True)  # Включаем режим демо-счета
+
+    # Получение баланса для проверки подключения
+    balance = await async_exchange.fetch_balance()
+    usdt_balance = balance["total"].get("USDT", 0)
+    logging.debug(f"Текущий баланс: {usdt_balance} USDT")   
+    await is_continue(async_exchange)
+
     executor = ThreadPoolExecutor()
     try:
         symbol = "DOGE/USDT:USDT"
