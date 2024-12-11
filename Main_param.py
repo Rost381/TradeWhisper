@@ -60,6 +60,7 @@ else:
 
 ADD_LOGS = os.getenv("ADD_LOGS")
 DATA_DIR = os.getenv("DATA_DIR")
+RUN_MODE = os.getenv("RUN_MODE")
 
 
 exchange_config = {
@@ -376,8 +377,12 @@ def add_technical_indicators(df):
     return df"""
 
 
-async def is_continue(exchange):
-    user_choice = input("Продолжить ? (Y/n): ")
+async def is_continue(exchange, exit=False):
+    """ For correct exit. Debug only"""
+    if exit:
+        user_choice ="Y"
+    else:
+        user_choice = input("Продолжить ? (Y/n): ")
     if user_choice in ["n", " N", "т", "Т"]:
         try:
             for task in asyncio.all_tasks():
@@ -465,7 +470,8 @@ async def get_full_data(exchange, symbol, timeframe="5m", since=None, limit=2016
         try:
             fetch_limit = 900 # min(1000, limit - len(all_ohlcv))
             ohlcv = await exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=fetch_limit)
-            
+            ohlcv = await exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=fetch_limit)
+
             if not ohlcv:
                 logging.debug("Нет новых данных для загрузки")
                 break
@@ -499,7 +505,7 @@ async def get_full_data(exchange, symbol, timeframe="5m", since=None, limit=2016
 
     # Возвращаем последние 'limit' записей
     print(return_limit)
-    await is_continue(exchange)
+    # await is_continue(exchange)
     return df.tail(return_limit)
 
 
@@ -527,10 +533,7 @@ def get_or_train_model_sync(symbol, train_df, models_dir, best_params=None):
 
     model_path = f'{models_dir}/{symbol.replace("/", "_").replace(":", "_")}_ppo'
     norm_path = f'{model_path}_norm.json'
-    print(model_path)
-    print(model_path)
-    input("Продолжить ?")
-
+    
     env = TradingEnvironment(train_df)
     norm_params = {'means': env.means.to_dict(), 'stds': env.stds.to_dict()}
     if os.path.exists(f"{model_path}.zip"):
@@ -540,9 +543,8 @@ def get_or_train_model_sync(symbol, train_df, models_dir, best_params=None):
                 norm_params = json.load(f)
         env = TradingEnvironment(train_df, norm_params=norm_params)
         env = DummyVecEnv([lambda: env])
-        model = PPO.load(model_path, env=env, device="auto")
+        model = PPO.load(model_path, env=env, device="cpu")
         logging.info("Модель загружена успешно")
-        input("Продолжить ?")
     else:
         logging.info("Модель не найдена, начало обучения")
         input("Продолжить ?")
@@ -578,14 +580,14 @@ def get_or_train_model_sync(symbol, train_df, models_dir, best_params=None):
                         policy_kwargs=policy_kwargs,
                         tensorboard_log="./ppo_tensorboard/",
                         verbose=1,
-                        device="auto")
+                        device="cpu")
         else:
             model = PPO(
                 "MlpPolicy",
                 env,
                 tensorboard_log="./ppo_tensorboard/",
                 verbose=1,
-                device="auto",
+                device="cpu",
             )
         model.learn(total_timesteps=500000)
         model.save(model_path)
@@ -644,7 +646,7 @@ def objective_sync(trial, train_df, test_df):
             policy_kwargs=policy_kwargs,
             tensorboard_log="./ppo_tensorboard/",
             verbose=0,
-            device="auto",
+            device="cpu",
         )
         model.learn(total_timesteps=100000)
         test_env = TradingEnvironment(test_df, norm_params={'means': means, 'stds': stds})
@@ -806,7 +808,6 @@ def shutdown_handler():
 def clear_log_file(filename):
     """
     Удаляет или очищает файл логов перед началом работы.
-
     :param filename: Имя файла логов.
     """
     try:
@@ -849,14 +850,32 @@ async def main():
         df = await get_full_data(async_exchange, symbol, timeframe='5m')  # Изменено на '5m'
         if df is not None and not df.empty:
             df = add_technical_indicators(df)
+
             train_size = int(len(df) * 0.8)
             train_df = df.iloc[:train_size].reset_index(drop=True)
             test_df = df.iloc[train_size:].reset_index(drop=True)
-            study = optuna.create_study(direction='maximize', pruner=optuna.pruners.MedianPruner())
-            await run_optuna(study, train_df, test_df, n_trials=15)
-            best_params = study.best_params
-            logging.info(f"Лучшие параметры оптимизации: {best_params}")
-            model, norm_params = await loop.run_in_executor(executor, get_or_train_model_sync, symbol, train_df, models_dir, best_params)
+
+            # study = optuna.create_study(direction='maximize', pruner=optuna.pruners.MedianPruner())
+            # await run_optuna(study, train_df, test_df, n_trials=15)
+            # best_params = study.best_params
+            # logging.info(f"Лучшие параметры оптимизации: {best_params}")
+            # model, norm_params = await loop.run_in_executor(executor, get_or_train_model_sync, symbol, train_df, models_dir, best_params)
+
+            if RUN_MODE == "TRADE_ONLY":
+                model_path = f'{models_dir}/{symbol.replace("/", "_").replace(":", "_")}_ppo'
+                norm_path = f'{model_path}_norm.json'
+
+                with open(norm_path, 'r') as f:
+                    norm_params = json.load(f)
+                    
+                logging.info("Нормализованные параметры загружены успешно")
+                print(f"{norm_params=}")    
+                model = PPO.load(model_path, device="cpu")
+                logging.info("Модель загружена успешно")
+                
+                
+                await is_continue(exchange=async_exchange)
+
             await loop.run_in_executor(executor, backtest_model_sync, model, test_df, symbol, norm_params)
             state = LiveTradingState(window_size=20)
             last_20_data = test_df.tail(state.window_size)
