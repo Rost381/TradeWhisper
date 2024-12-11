@@ -46,7 +46,15 @@ logging.basicConfig(
 
 )
 
+# Set global var
+SYMBOL = os.getenv("SYMBOL")
+
 TRADE_MODE = os.getenv("TRADE_MODE")
+ADD_LOGS = os.getenv("ADD_LOGS")
+DATA_DIR = os.getenv("DATA_DIR")
+RUN_MODE = os.getenv("RUN_MODE")
+MODELS_DIR = os.getenv("MODELS_DIR")
+
 if TRADE_MODE == "LIVE":
     API_KEY = os.getenv("API_KEY", "TAHqn***xGhVmof2E")
     API_SECRET = os.getenv("API_SECRET", "0QVQhcRx6SP1uZ****BJDIiQKqN1")
@@ -57,10 +65,6 @@ else:
 
 # print(API_KEY,API_SECRET)
 # input("Is it correct?")
-
-ADD_LOGS = os.getenv("ADD_LOGS")
-DATA_DIR = os.getenv("DATA_DIR")
-RUN_MODE = os.getenv("RUN_MODE")
 
 
 exchange_config = {
@@ -384,12 +388,13 @@ async def is_continue(exchange, exit=False):
     else:
         user_choice = input("Продолжить ? (Y/n): ")
     if user_choice in ["n", " N", "т", "Т"]:
-        try:
-            for task in asyncio.all_tasks():
-                task.cancel()
-            await exchange.close()
-        except:
-            pass
+        if exchange:
+            try:
+                for task in asyncio.all_tasks():
+                    task.cancel()
+                await exchange.close()
+            except:
+                pass
         sys.exit(0)
 
 
@@ -837,12 +842,12 @@ async def main():
     balance = await async_exchange.fetch_balance()
     usdt_balance = balance["total"].get("USDT", 0)
     logging.debug(f"Текущий баланс: {usdt_balance} USDT")   
-    await is_continue(async_exchange)
+    # await is_continue(async_exchange)
 
     executor = ThreadPoolExecutor()
     try:
-        symbol = "DOGE/USDT:USDT"
-        models_dir = 'models'
+        symbol = SYMBOL
+        models_dir = MODELS_DIR
         os.makedirs(models_dir, exist_ok=True)
         if not await verify_symbol(async_exchange, symbol):
             logging.error(f"Символ {symbol} недоступен")
@@ -854,12 +859,13 @@ async def main():
             train_size = int(len(df) * 0.8)
             train_df = df.iloc[:train_size].reset_index(drop=True)
             test_df = df.iloc[train_size:].reset_index(drop=True)
-
-            # study = optuna.create_study(direction='maximize', pruner=optuna.pruners.MedianPruner())
-            # await run_optuna(study, train_df, test_df, n_trials=15)
-            # best_params = study.best_params
-            # logging.info(f"Лучшие параметры оптимизации: {best_params}")
-            # model, norm_params = await loop.run_in_executor(executor, get_or_train_model_sync, symbol, train_df, models_dir, best_params)
+            
+            if RUN_MODE != "TRADE_ONLY":
+                study = optuna.create_study(direction='maximize', pruner=optuna.pruners.MedianPruner())
+                await run_optuna(study, train_df, test_df, n_trials=15)
+                best_params = study.best_params
+                logging.info(f"Лучшие параметры оптимизации: {best_params}")
+                model, norm_params = await loop.run_in_executor(executor, get_or_train_model_sync, symbol, train_df, models_dir, best_params)
 
             if RUN_MODE == "TRADE_ONLY":
                 model_path = f'{models_dir}/{symbol.replace("/", "_").replace(":", "_")}_ppo'
@@ -867,14 +873,13 @@ async def main():
 
                 with open(norm_path, 'r') as f:
                     norm_params = json.load(f)
-                    
+
                 logging.info("Нормализованные параметры загружены успешно")
                 print(f"{norm_params=}")    
                 model = PPO.load(model_path, device="cpu")
                 logging.info("Модель загружена успешно")
-                
-                
-                await is_continue(exchange=async_exchange)
+
+                # await is_continue(exchange=async_exchange)
 
             await loop.run_in_executor(executor, backtest_model_sync, model, test_df, symbol, norm_params)
             state = LiveTradingState(window_size=20)
