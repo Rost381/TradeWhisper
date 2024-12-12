@@ -326,6 +326,10 @@ def calculate_rvi(df, window=10):
 
 def add_technical_indicators(df):
     logging.debug("Добавление технических индикаторов")
+
+    # Сброс индекса для предотвращения ошибок из-за дубликатов
+    df = df.reset_index(drop=True)
+
     df['rsi'] = RSIIndicator(df['close'], window=14).rsi()
     df['ema20'] = trend.EMAIndicator(df['close'], window=20).ema_indicator()
     macd = MACD(df['close'])
@@ -859,7 +863,7 @@ async def main():
             train_size = int(len(df) * 0.8)
             train_df = df.iloc[:train_size].reset_index(drop=True)
             test_df = df.iloc[train_size:].reset_index(drop=True)
-            
+
             if RUN_MODE != "TRADE_ONLY":
                 study = optuna.create_study(direction='maximize', pruner=optuna.pruners.MedianPruner())
                 await run_optuna(study, train_df, test_df, n_trials=15)
@@ -882,6 +886,7 @@ async def main():
                 # await is_continue(exchange=async_exchange)
 
             await loop.run_in_executor(executor, backtest_model_sync, model, test_df, symbol, norm_params)
+            await is_continue(exchange=async_exchange)
             state = LiveTradingState(window_size=20)
             last_20_data = test_df.tail(state.window_size)
             initial_balance = await get_real_balance_async(async_exchange)
