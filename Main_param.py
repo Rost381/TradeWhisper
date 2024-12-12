@@ -29,43 +29,62 @@ from concurrent.futures import ThreadPoolExecutor
 
 load_dotenv()
 
+env_vars = [
+    "SYMBOL",
+    "TRADE_MODE",
+    "LOGS_TO_FILE",
+    "DATA_DIR",
+    "RUN_MODE",
+    "MODELS_DIR",
+    "BK_DIR",
+    "BK_START",
+    "BK_END",
+]
+
+globals().update({var: os.getenv(var) for var in env_vars})
+
 if sys.platform.startswith('win'):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 script_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
 log_filename = f"{script_name}.log"
 
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s %(levelname)s %(message)s',
-    handlers=[
+if LOGS_TO_FILE == "DISABLE":  # type: ignore
+    handlers = [
         logging.StreamHandler(sys.stdout),  # Вывод в консоль
-        logging.FileHandler(log_filename, mode='a', encoding='utf-8')  # Вывод в файл
+    ]
+else:
+    handlers = [
+        logging.StreamHandler(sys.stdout),  # Вывод в консоль
+        logging.FileHandler(log_filename, mode="a", encoding="utf-8"),  # Вывод в файл
     ]
 
+logging.basicConfig(
+    level=getattr(logging, log_level),
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=handlers,
 )
 
 # Set global var
-SYMBOL = os.getenv("SYMBOL")
 
-TRADE_MODE = os.getenv("TRADE_MODE")
-ADD_LOGS = os.getenv("ADD_LOGS")
-DATA_DIR = os.getenv("DATA_DIR")
-RUN_MODE = os.getenv("RUN_MODE")
-MODELS_DIR = os.getenv("MODELS_DIR")
+# SYMBOL = os.getenv("SYMBOL")
+# TRADE_MODE = os.getenv("TRADE_MODE")
+# LOGS_TO_FILE = os.getenv("LOGS_TO_FILE")
+# DATA_DIR = os.getenv("DATA_DIR")
+# RUN_MODE = os.getenv("RUN_MODE")
+# MODELS_DIR = os.getenv("MODELS_DIR")
+# BK_DIR = os.getenv("BK_DIR")
+# BK_START = os.getenv("BK_START")
+# BK_END = os.getenv("BK_END")
 
-if TRADE_MODE == "LIVE":
+if TRADE_MODE == "LIVE": # type: ignore
     API_KEY = os.getenv("API_KEY", "TAHqn***xGhVmof2E")
     API_SECRET = os.getenv("API_SECRET", "0QVQhcRx6SP1uZ****BJDIiQKqN1")
 else:
     API_KEY = os.getenv("API_KEY_DEMO", "TAHqn***xGhVmof2E")
     API_SECRET = os.getenv("API_SECRET_DEMO", "0QVQhcRx6SP1uZ****BJDIiQKqN1")
-
-
-# print(API_KEY,API_SECRET)
-# input("Is it correct?")
-
 
 exchange_config = {
     'apiKey': API_KEY,
@@ -84,6 +103,19 @@ class TradingEnvironment(gym.Env):
     def __init__(self, data, norm_params=None, initial_balance=10, risk_percentage=0.7, short_term_threshold=10, long_term_threshold=50, history_size=100, window_size=20):
         super(TradingEnvironment, self).__init__()
         logging.debug("Initializing TradingEnvironment")
+        self.result_df = pd.DataFrame(
+            columns=[
+                "type",
+                "open_ts",
+                "open_price",
+                "close_ts",
+                "close_price",
+                "duration",
+                "profit",
+                "diff_PCT",
+                "balance",
+            ]
+        )
         self.timestamps = data['timestamp'].reset_index(drop=True)
         self.data = data.drop(columns=['timestamp']).reset_index(drop=True)
         self.initial_balance = initial_balance
@@ -112,6 +144,19 @@ class TradingEnvironment(gym.Env):
         self.history = deque(maxlen=history_size)
         self.reset()
         self.save_state()
+        
+        
+    def create_result_df(self, df):
+        def calculate_diff(row):
+            if row["type"] == "long":
+                return ((row["close_price"] - row["open_price"]) / row["open_price"]) * 100
+            elif row["type"] == "short":
+                return ((row["open_price"] - row["close_price"]) / row["open_price"]) * 100
+            return 0
+        # Применение функции для создания нового столбца
+        df["diff_PCT"] = df.apply(calculate_diff, axis=1)
+        df.to_csv("models/result.csv")
+        print(df)     
 
     def reset(self, *, seed=None, options=None):
         logging.debug("Resetting environment")
@@ -183,9 +228,14 @@ class TradingEnvironment(gym.Env):
         else:
             logging.warning("Недостаточно истории для отката")
 
-    def detect_error(self):
+   
+
+    def detect_error(self, df):
         if self.balance < self.initial_balance * 0.5:
             logging.error("Баланс упал ниже половины начального значения")
+            if RUN_MODE != "LEARN_ONLY":# type: ignore
+                self.create_result_df(df)
+                sys.exit[0]
             return True
         return False
 
@@ -202,7 +252,8 @@ class TradingEnvironment(gym.Env):
             profit = self.balance - self.previous_balance
             volatility = self.data['atr'].iloc[self.current_step - 1]
             reward = profit / (volatility + 1e-8)
-            logging.debug(f"Эпизод завершен. Прибыль: {profit}, Волатильность: {volatility}, Награда: {reward}")
+            logging.debug(
+                f"Эпизод завершен. Прибыль: {profit}, Волатильность: {volatility}, Награда: {reward}, Время: {timestamp}")
             return self._get_observation(), reward, self.done, False, info
         price = self.data['close'].iloc[self.current_step]
         timestamp = self.timestamps[self.current_step]
@@ -214,17 +265,19 @@ class TradingEnvironment(gym.Env):
             pass
         elif action == 1:
             if self.position == 'short':
-                logging.info("Действие: Переключение с шорт на лонг")
+                logging.info(
+                    f"Действие: Переключение с шорт на лонг, Время: {timestamp}")
                 reward += self._close_position(price, timestamp)
             if self.position != 'long':
-                logging.info("Действие: Открыть длинную позицию")
+                logging.info(f"Действие:  Открыть длинную позицию, Время: {timestamp}")
                 self._open_position('long', price, timestamp, atr)
         elif action == 2:
             if self.position == 'long':
-                logging.info("Действие: Переключение с лонг на шорт")
+                logging.info(
+                    f"Действие: Переключение с лонг на шорт, Время: {timestamp},")
                 reward += self._close_position(price, timestamp)
             if self.position != 'short':
-                logging.info("Действие: Открыть короткую позицию")
+                logging.info(f"Действие: Открыть короткую позицию, Время: {timestamp}")
                 self._open_position('short', price, timestamp, atr)
 
         # Удаляем логику тейк-профита и стоп-лосса
@@ -244,9 +297,12 @@ class TradingEnvironment(gym.Env):
         self.current_step += 1
         if self.current_step >= len(self.data) - 1:
             self.done = True
-            logging.debug("Достигнут конец данных")
+            logging.info("Достигнут конец данных")
+            if RUN_MODE != "LEARN_ONLY":  # type: ignore
+                self.create_result_df(self.result_df)
+
         self.balance_history.append(self.balance)
-        if self.detect_error():
+        if self.detect_error(self.result_df):
             self.handle_error()
             reward -= 10
             self.done = False
@@ -267,7 +323,13 @@ class TradingEnvironment(gym.Env):
             'entry_step': self.current_step,
             'atr': atr
         })
-        logging.info(f"Позиция открыта: {position_type} по цене {price}")
+        logging.info(
+            f"Позиция открыта: {position_type} по цене {price}, Время: {timestamp}"
+        )
+        if RUN_MODE != "LEARN_ONLY":  # type: ignore
+            self.result_df.loc[
+                len(self.result_df), ["type", "open_ts", "open_price"]
+            ] = [position_type, timestamp, price]
 
     def _close_position(self, price, timestamp):
         if self.entry_price == 0:
@@ -308,7 +370,14 @@ class TradingEnvironment(gym.Env):
             'profit': profit,
             'atr': atr
         })
-        logging.info(f"Позиция закрыта: {self.position} по цене {price}, Прибыль: {profit}")
+        logging.info(
+            f"Позиция закрыта: {self.position} по цене {price}, Прибыль: {profit}, Время: {timestamp}, Продолжительность: {duration*5}"
+        )
+        if RUN_MODE != "LEARN_ONLY":# type: ignore
+            self.result_df.loc[
+                len(self.result_df) - 1, ["close_ts", "close_price", "duration", "profit", "balance"]
+                ] = [ timestamp, price, round((duration*5),0), profit, self.balance]
+
         self.position = None
         self.entry_price = 0
         self.position_size = 0
@@ -402,16 +471,20 @@ async def is_continue(exchange, exit=False):
         sys.exit(0)
 
 
+def create_file_path(symbol, timeframe, data_dir=DATA_DIR) -> str: # type: ignore
+    # Формирование имени файла
+    symbol_filename = symbol.split("/")
+    symbol_filename = symbol_filename[0] + symbol_filename[1][:4] + ".csv"
+    return f"{data_dir}_{timeframe}/{symbol_filename}"
+
+
 # New fn with save df
 async def get_full_data(exchange, symbol, timeframe="5m", since=None, limit=2016):
     return_limit = limit # Количество возврашаемых свечей
     all_ohlcv = []
     logging.info(f"Начало получения данных для символа {symbol}")
 
-    # Формирование имени файла
-    symbol_filename = symbol.split("/")
-    symbol_filename = symbol_filename[0] + symbol_filename[1][:4] + ".csv"
-    file_path = f"{DATA_DIR}_{timeframe}/{symbol_filename}"
+    file_path = create_file_path(symbol, timeframe)
 
     # Создание директории, если её нет
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -829,17 +902,34 @@ def clear_log_file(filename):
     except Exception as e:
         print(f"Ошибка при очистке файла логов: {e}")
 
+def create_dare_mask(df, start_date, end_date):
+    # Логика фильтрации
+    if start_date and end_date:
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        # Фильтрация по диапазону дат
+        mask = (df['timestamp'].dt.date >= pd.to_datetime(start_date).date()) & \
+            (df['timestamp'].dt.date <= pd.to_datetime(end_date).date())  
+    elif start_date:
+        # Фильтрация от start_date до конца данных
+        mask = df['timestamp'].dt.date >= pd.to_datetime(start_date).date()
+    elif end_date:
+        # Фильтрация от начала данных до end_date
+        mask = df['timestamp'].dt.date <= pd.to_datetime(end_date).date()
+    else:
+        # Если оба параметра отсутствуют, использовать все данные
+        mask = pd.Series([True] * len(df))
+    return mask
+
 
 async def main():
-
-    if not ADD_LOGS:
+    if LOGS_TO_FILE=="NEW": # type: ignore
         clear_log_file(log_filename) # Удаляем логи предыдущего запука
     loop = asyncio.get_running_loop()
     if not sys.platform.startswith('win'):
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, shutdown_handler)
     async_exchange = ccxt_async.bybit(exchange_config)
-    if TRADE_MODE == "DEMO":
+    if TRADE_MODE == "DEMO": # type: ignore
         async_exchange.enable_demo_trading(True)  # Включаем режим демо-счета
 
     # Получение баланса для проверки подключения
@@ -850,8 +940,8 @@ async def main():
 
     executor = ThreadPoolExecutor()
     try:
-        symbol = SYMBOL
-        models_dir = MODELS_DIR
+        symbol = SYMBOL # type: ignore
+        models_dir = MODELS_DIR # type: ignore
         os.makedirs(models_dir, exist_ok=True)
         if not await verify_symbol(async_exchange, symbol):
             logging.error(f"Символ {symbol} недоступен")
@@ -859,19 +949,18 @@ async def main():
         df = await get_full_data(async_exchange, symbol, timeframe='5m')  # Изменено на '5m'
         if df is not None and not df.empty:
             df = add_technical_indicators(df)
-
             train_size = int(len(df) * 0.8)
             train_df = df.iloc[:train_size].reset_index(drop=True)
             test_df = df.iloc[train_size:].reset_index(drop=True)
 
-            if RUN_MODE != "TRADE_ONLY":
+            if RUN_MODE != "TRADE_ONLY": # type: ignore
                 study = optuna.create_study(direction='maximize', pruner=optuna.pruners.MedianPruner())
                 await run_optuna(study, train_df, test_df, n_trials=15)
                 best_params = study.best_params
                 logging.info(f"Лучшие параметры оптимизации: {best_params}")
                 model, norm_params = await loop.run_in_executor(executor, get_or_train_model_sync, symbol, train_df, models_dir, best_params)
 
-            if RUN_MODE == "TRADE_ONLY":
+            if RUN_MODE == "TRADE_ONLY": # type: ignore
                 model_path = f'{models_dir}/{symbol.replace("/", "_").replace(":", "_")}_ppo'
                 norm_path = f'{model_path}_norm.json'
 
@@ -879,14 +968,29 @@ async def main():
                     norm_params = json.load(f)
 
                 logging.info("Нормализованные параметры загружены успешно")
-                print(f"{norm_params=}")    
+                # logging.info(f"{norm_params=}")
                 model = PPO.load(model_path, device="cpu")
                 logging.info("Модель загружена успешно")
 
+            if BK_DIR: # type: ignore
+                file_path = create_file_path(symbol, timeframe="5m", data_dir=BK_DIR) # type: ignore
+                logging.info(f"Для Бэктеста используется файл: {file_path}")
+                df = pd.read_csv(file_path)
+                mask = create_dare_mask(df, start_date=BK_START, end_date=BK_END) # type: ignore
+                test_df = df[mask]
+                logging.info(f"Бэктест с {test_df["timestamp"].iloc[1]} по {test_df["timestamp"].iloc[-1]}")
+                if test_df is not None and not test_df.empty:
+                    test_df = add_technical_indicators(test_df)
+                    test_df = test_df.reset_index(drop=True)
+                else:
+                    logging.error("Не удалось загрузить данные или данные пусты")
+                    await is_continue(exchange=async_exchange, exit=True)
                 # await is_continue(exchange=async_exchange)
-
+            # norm_params = None
             await loop.run_in_executor(executor, backtest_model_sync, model, test_df, symbol, norm_params)
+
             await is_continue(exchange=async_exchange)
+
             state = LiveTradingState(window_size=20)
             last_20_data = test_df.tail(state.window_size)
             initial_balance = await get_real_balance_async(async_exchange)

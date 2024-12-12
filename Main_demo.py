@@ -50,7 +50,7 @@ API_KEY = os.getenv("API_KEY", "TAHqn***xGhVmof2E")
 API_SECRET = os.getenv("API_SECRET", "0QVQhcRx6SP1uZ****BJDIiQKqN1")
 
 
-ADD_LOGS = os.getenv("ADD_LOGS")
+LOGS_TO_FILE = os.getenv("LOGS_TO_FILE")
 DATA_DIR = os.getenv("DATA_DIR")
 
 
@@ -685,7 +685,7 @@ def clear_log_file(filename):
 
 async def main():
 
-    if not ADD_LOGS:
+    if not LOGS_TO_FILE:
         clear_log_file(log_filename) # Удаляем логи предыдущего запука
     loop = asyncio.get_running_loop()
     if not sys.platform.startswith('win'):
