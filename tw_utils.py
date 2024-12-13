@@ -15,7 +15,7 @@ DATA_DIR = os.getenv("DATA_DIR")
 
 
 async def is_continue(exchange, exit=False):
-    """For correct exit. Debug only"""
+    """For correct exit. For Debug only"""
     if exit:
         user_choice = "Y"
     else:
@@ -239,3 +239,139 @@ def create_date_mask(df, start_date, end_date):
         # Если оба параметра отсутствуют, использовать все данные
         mask = pd.Series([True] * len(df))
     return mask
+
+def create_result_df(df):
+    def calculate_diff(row):
+        if row["type"] == "long":
+            return (
+                (row["close_price"] - row["open_price"]) / row["open_price"]
+            ) * 100
+        elif row["type"] == "short":
+            return (
+                (row["open_price"] - row["close_price"]) / row["open_price"]
+            ) * 100
+        return 0
+
+    # Применение функции для создания нового столбца
+    df["diff_PCT"] = df.apply(calculate_diff, axis=1)
+    df.to_csv("models/result.csv")
+    print(df)
+
+    df = df[: len(df)-2]
+    # Метрики для расчёта
+    # 1. Общее количество diff_PCT > 0.2 и процентное отношение к количеству сделок
+    total_diff_pct_gt_0_2 = df[df["diff_PCT"] > 0.2].shape[0]
+    total_trades = df.shape[0]
+    diff_pct_gt_0_2_ratio = (
+        (total_diff_pct_gt_0_2 / total_trades * 100) if total_trades > 0 else 0
+    )
+
+    # 2. Общее количество diff_PCT > 0.2 при type=="long" и процентное отношение
+    long_trades = df[df["type"] == "long"]
+    long_diff_pct_gt_0_2 = long_trades[long_trades["diff_PCT"] > 0.2].shape[0]
+    long_diff_pct_gt_0_2_ratio = (
+        (long_diff_pct_gt_0_2 / long_trades.shape[0] * 100)
+        if long_trades.shape[0] > 0
+        else 0
+    )
+
+    # 3. Общее количество положительных profit при type=="short" и процентное отношение
+    short_trades = df[df["type"] == "short"]
+    short_positive_profit = short_trades[short_trades["profit"] > 0].shape[0]
+    short_positive_profit_ratio = round((
+        (short_positive_profit / short_trades.shape[0] * 100),2)
+        if short_trades.shape[0] > 0
+        else 0
+    )
+
+    # 4. Общее количество положительных profit и процентное отношение к количеству сделок
+    total_positive_profit = df[df["profit"] > 0].shape[0]
+    total_positive_profit_ratio = round((
+        (total_positive_profit / total_trades * 100) if total_trades > 0 else 0
+    ),2)
+
+    # 5. Общее количество положительных profit при type=="long" и процентное отношение
+    long_positive_profit = long_trades[long_trades["profit"] > 0].shape[0]
+    long_positive_profit_ratio = round((
+        (long_positive_profit / long_trades.shape[0] * 100),2)
+        if long_trades.shape[0] > 0
+        else 0
+    )
+
+    # 6. Общее количество положительных profit при type=="short" и процентное отношение
+    short_positive_profit = short_trades[short_trades["profit"] > 0].shape[0]
+    short_positive_profit_ratio = (
+        (short_positive_profit / short_trades.shape[0] * 100)
+        if short_trades.shape[0] > 0
+        else 0
+    )
+
+    # Дополнительные расчёты
+    # Самая прибыльная и убыточная сделка во всём DataFrame
+    max_profit_trade = df["profit"].max() if not df.empty else None
+    min_profit_trade = df["profit"].min() if not df.empty else None
+
+    # Самая прибыльная и убыточная сделка для long
+    max_profit_long = long_trades["profit"].max() if not long_trades.empty else None
+    min_profit_long = long_trades["profit"].min() if not long_trades.empty else None
+
+    # Самая прибыльная и убыточная сделка для short
+    max_profit_short = short_trades["profit"].max() if not short_trades.empty else None
+    min_profit_short = short_trades["profit"].min() if not short_trades.empty else None
+
+    # 7. Общее количество сделок
+    total_deals = len(df)
+
+    # Итоговый DataFrame с результатами
+    summary_df = pd.DataFrame(
+        {
+            "Metric": [
+                # "Total diff_PCT > 0.2",
+                "Ratio positive profit to all trades (%)",
+                "Ratio positive profit to long trades (%)",
+                "Ratio positive profit to short trades (%)",
+                "Total positive profit",
+                "Total positive profit (long)",
+                "Total positive profit (short)",
+                "Ratio diff_PCT > 0.2 to all trades (%)",
+                
+                "Max profit trade",
+                "Min profit trade",
+                "Max profit trade (long)",
+                "Min profit trade (long)",
+                "Max profit trade (short)",
+                "Min profit trade (short)",
+                
+                "Total Deals",
+                # "Total diff_PCT > 0.2 (long)",
+                # "Ratio diff_PCT > 0.2 to long trades (%)",
+            ],
+            "Value": [
+                # total_diff_pct_gt_0_2,
+                total_positive_profit_ratio,
+                long_positive_profit_ratio,
+                short_positive_profit_ratio,
+                total_positive_profit,
+                long_positive_profit,
+                short_positive_profit,
+                diff_pct_gt_0_2_ratio,
+                
+                max_profit_trade,
+                min_profit_trade,
+                max_profit_long,
+                min_profit_long,
+                max_profit_short,
+                min_profit_short,
+                
+                total_deals,
+                # long_diff_pct_gt_0_2,
+                # long_diff_pct_gt_0_2_ratio,
+            ],
+        }
+    )
+
+    # Сохранение в файл CSV
+    output_path = "models/stat.csv"
+    summary_df.to_csv(output_path, index=False)
+
+    print(f"Summary saved to {output_path}")

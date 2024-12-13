@@ -27,10 +27,11 @@ import optuna
 import torch
 from concurrent.futures import ThreadPoolExecutor
 
-from exchange_utils import *
+from tw_utils import *
 
 load_dotenv()
 
+# Set global var
 env_vars = [
     "SYMBOL",
     "TRADE_MODE",
@@ -69,17 +70,15 @@ logging.basicConfig(
     handlers=handlers,
 )
 
-# Set global var
-
-# SYMBOL = os.getenv("SYMBOL")
-# TRADE_MODE = os.getenv("TRADE_MODE")
-# LOGS_TO_FILE = os.getenv("LOGS_TO_FILE")
-# DATA_DIR = os.getenv("DATA_DIR")
-# RUN_MODE = os.getenv("RUN_MODE")
-# MODELS_DIR = os.getenv("MODELS_DIR")
-# BK_DIR = os.getenv("BK_DIR")
-# BK_START = os.getenv("BK_START")
-# BK_END = os.getenv("BK_END")
+"""SYMBOL = os.getenv("SYMBOL")
+TRADE_MODE = os.getenv("TRADE_MODE")
+LOGS_TO_FILE = os.getenv("LOGS_TO_FILE")
+DATA_DIR = os.getenv("DATA_DIR")
+RUN_MODE = os.getenv("RUN_MODE")
+MODELS_DIR = os.getenv("MODELS_DIR")
+BK_DIR = os.getenv("BK_DIR")
+BK_START = os.getenv("BK_START")
+BK_END = os.getenv("BK_END")"""
 
 if TRADE_MODE == "LIVE": # type: ignore
     API_KEY = os.getenv("API_KEY", None)
@@ -148,18 +147,6 @@ class TradingEnvironment(gym.Env):
                 "balance",
             ]
         )
-
-    def create_result_df(self, df):
-        def calculate_diff(row):
-            if row["type"] == "long":
-                return ((row["close_price"] - row["open_price"]) / row["open_price"]) * 100
-            elif row["type"] == "short":
-                return ((row["open_price"] - row["close_price"]) / row["open_price"]) * 100
-            return 0
-        # Применение функции для создания нового столбца
-        df["diff_PCT"] = df.apply(calculate_diff, axis=1)
-        df.to_csv("models/result.csv")
-        print(df)     
 
     def reset(self, *, seed=None, options=None):
         logging.debug("Resetting environment")
@@ -235,7 +222,7 @@ class TradingEnvironment(gym.Env):
         if self.balance < self.initial_balance * 0.5:
             logging.error("Баланс упал ниже половины начального значения")
             if self.is_backtest:
-                self.create_result_df(df)
+                create_result_df(df)
                 sys.exit[0]
             return True
         return False
@@ -300,7 +287,7 @@ class TradingEnvironment(gym.Env):
             self.done = True
             logging.info("Достигнут конец данных")
             if self.is_backtest:
-                self.create_result_df(self.result_df)
+                create_result_df(self.result_df)
 
         self.balance_history.append(self.balance)
         if self.detect_error(self.result_df):
@@ -770,7 +757,7 @@ async def main():
                     logging.error("Не удалось загрузить данные или данные пусты")
                     await is_continue(exchange=async_exchange, exit=True)
                 # await is_continue(exchange=async_exchange)
-            # norm_params = None
+            norm_params = None
             await loop.run_in_executor(executor, backtest_model_sync, model, test_df, symbol, norm_params)
 
             await is_continue(exchange=async_exchange)

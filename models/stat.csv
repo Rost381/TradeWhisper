@@ -1,0 +1,15 @@
+Metric,Value
+Ratio positive profit to all trades (%),35.2112676056338
+Ratio positive profit to long trades (%),36.11111111111111
+Ratio positive profit to short trades (%),34.285714285714285
+Total positive profit,25.0
+Total positive profit (long),13.0
+Total positive profit (short),12.0
+Ratio diff_PCT > 0.2 to all trades (%),43.66197183098591
+Max profit trade,0.32381959262851734
+Min profit trade,-0.6907020740900487
+Max profit trade (long),0.32381959262851734
+Min profit trade (long),-0.4138447921306107
+Max profit trade (short),0.2015317877408421
+Min profit trade (short),-0.6907020740900487
+Total Deals,71.0
