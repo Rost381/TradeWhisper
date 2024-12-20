@@ -41,29 +41,14 @@ from tw_utils import *
 from indicacators_sets import *
 
 
-load_dotenv()
-
-# Dynamic set global vars
-# env_vars = [
-#     "SYMBOL",
-#     "TIMEFRAME",
-#     "TRADE_MODE",
-#     "LOGS_TO_FILE",
-#     "DATA_DIR",
-#     "RUN_MODE",
-#     "MODELS_DIR",
-#     "BK_DIR",
-#     "BK_START",
-#     "BK_END",
-# ]
-
-# globals().update({var: os.getenv(var) for var in env_vars})
+# load_dotenv(".env-bk", override=True)
+load_dotenv(".env-learn", override=True)
 
 # Set global vars
 
 SYMBOL = os.getenv("SYMBOL")
 TIMEFRAME = os.getenv("TIMEFRAME")
-TRADE_MODE = os.getenv("TRADE_MODE")
+ACC_MODE = os.getenv("ACC_MODE")
 LOGS_TO_FILE = os.getenv("LOGS_TO_FILE")
 DATA_DIR = os.getenv("DATA_DIR")
 RUN_MODE = os.getenv("RUN_MODE")
@@ -72,10 +57,17 @@ STATS_DIR = os.getenv("STATS_DIR")
 BK_DIR = os.getenv("BK_DIR")
 BK_START = os.getenv("BK_START")
 BK_END = os.getenv("BK_END")
-INDICATOR_SET = os.getenv("INDICATOR_SET")
+INDICATORS_SET = os.getenv("INDICATORS_SET")
+MODEL_SUFFIX = os.getenv("MODEL_SUFFIX")
+
+STATS_DIR = f"{STATS_DIR}_{MODEL_SUFFIX}"
 
 if sys.platform.startswith('win'):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
+if not os.path.exists(STATS_DIR):
+    os.makedirs(STATS_DIR)
 
 script_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
 log_filename = f"{script_name}.log"
@@ -95,11 +87,11 @@ else:
 
 logging.basicConfig(
     level=getattr(logging, log_level),
-    format="%(asctime)s %(levelname)s %(message)s",
+    format="%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s",
     handlers=handlers,
 )
 
-if TRADE_MODE == "LIVE":  
+if ACC_MODE == "LIVE":  
     API_KEY = os.getenv("API_KEY", None)
     API_SECRET = os.getenv("API_SECRET", None)
 else:
@@ -119,7 +111,7 @@ exchange_config = {
 }
 
 class TradingEnvironment(gym.Env):
-    def __init__(self, data, norm_params=None, is_backtest=False, initial_balance=10, risk_percentage=0.7, short_term_threshold=10, long_term_threshold=50, history_size=100, window_size=20):
+    def __init__(self, data, norm_params=None, is_backtest=False, initial_balance=10, risk_percentage=0.7, short_term_threshold=10, long_term_threshold=50, history_size=240, window_size=48):
         super(TradingEnvironment, self).__init__()
         logging.debug("Initializing TradingEnvironment")
         self.is_backtest = is_backtest
@@ -240,7 +232,8 @@ class TradingEnvironment(gym.Env):
 
     def detect_error(self):
         if self.balance < self.initial_balance * 0.5:
-            logging.error("Баланс упал ниже половины начального значения")
+            logging.error("Баланс упал ниже 50% начального")
+            # Пишем результат в df
             if self.is_backtest:
                 create_result_df(self.result_df, STATS_DIR)
                 sys.exit[1]
@@ -269,24 +262,30 @@ class TradingEnvironment(gym.Env):
         logging.debug(f"Текущий шаг: {self.current_step}, Цена: {price}, Время: {timestamp}, ATR: {atr}")
 
         if action == 0:
-            logging.debug("Действие: Удерживать позицию")
+            logging.debug("Действие: Удерживать позицию / Ждать")
             pass
+
         elif action == 1:
-            if self.position == 'short':
-                logging.info(
-                    f"Действие: Переключение с шорт на лонг, Время: {timestamp}")
-                reward += self._close_position(price, timestamp)
+            # if self.position == 'short':
+            #     logging.info(
+            #         f"Действие: Переключение с шорт на лонг, Время: {timestamp}")
+            #     reward += self._close_position(price, timestamp)
             if self.position != 'long':
                 logging.info(f"Действие:  Открыть длинную позицию, Время: {timestamp}")
                 self._open_position('long', price, timestamp, atr)
+
         elif action == 2:
             if self.position == 'long':
+                # logging.info(
+                #     f"Действие: Переключение с лонг на шорт, Время: {timestamp},")
                 logging.info(
-                    f"Действие: Переключение с лонг на шорт, Время: {timestamp},")
+                    f"Действие: Закрыть лонг, Время: {timestamp},")
                 reward += self._close_position(price, timestamp)
-            if self.position != 'short':
-                logging.info(f"Действие: Открыть короткую позицию, Время: {timestamp}")
-                self._open_position('short', price, timestamp, atr)
+            # if self.position != 'short':
+            #     logging.info(f"Действие: Открыть короткую позицию, Время: {timestamp}")
+            #     self._open_position('short', price, timestamp, atr)
+            if self.position is None:
+                reward = -0.01 # Штраф за закрытие неоткрытой позиции
 
         # Удаляем логику тейк-профита и стоп-лосса
 
@@ -306,6 +305,7 @@ class TradingEnvironment(gym.Env):
         if self.current_step >= len(self.data) - 1:
             self.done = True
             logging.info("Достигнут конец данных")
+            # Пишем результат в df
             if self.is_backtest:
                 create_result_df(self.result_df, STATS_DIR)
 
@@ -358,6 +358,7 @@ class TradingEnvironment(gym.Env):
         self.balance += profit
         self.total_profit += profit
         reward = profit / self.position_size
+        reward = reward * 100
         # Удаляем влияние тейк-профита и стоп-лосса на награду
         # if self.position == 'long' and profit < 0:
         #     reward -= 0.1
@@ -379,8 +380,9 @@ class TradingEnvironment(gym.Env):
             'atr': atr
         })
         logging.info(
-            f"Позиция закрыта: {self.position} по цене {price}, Прибыль: {profit}, Время: {timestamp}, Продолжительность: {duration}"
+            f"Позиция закрыта: {self.position} по цене {price}, Прибыль: {profit}, Награда: {reward}, Время: {timestamp}, Продолжительность: {duration}"
         )
+        # Пишем результат в df
         if self.is_backtest:
             self.result_df.loc[
                 len(self.result_df) - 1, ["close_ts", "close_price", "duration", "profit", "balance"]
@@ -405,10 +407,8 @@ def calculate_rvi(df, window=10):
 # Функция для добавления технических индикаторов
 def add_technical_indicators(df):
 
-    if INDICATOR_SET == "original":
-        df = add_technical_indicators_original(df) # Original set
-    if INDICATOR_SET == "v1":
-        df = add_technical_indicators_v1(df)  # Original set
+    df = add_technical_indicators_original(df) # Original set
+
     return df
 
 
@@ -429,7 +429,7 @@ def add_technical_indicators(df):
                 logging.debug("Достигнута текущая временная метка")
                 break
         except Exception as e:
-            logging.error(f"Ошибка при получении данных: {e}")
+            logging.error(f"Ошибка при получении данных: {e}\n", exc_info=True)
             break
     df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
@@ -440,9 +440,9 @@ def add_technical_indicators(df):
 def get_or_train_model_sync(symbol, train_df, models_dir, best_params=None):
     logging.info(f"Получение или обучение модели для символа {symbol}")
 
-    model_path = f'{models_dir}/{symbol.replace("/", "_").replace(":", "_")}_ppo'
+    model_path = f'{models_dir}/{symbol.replace("/", "_").split(":")[0]}_{MODEL_SUFFIX}'
     norm_path = f'{model_path}_norm.json'
-    
+
     env = TradingEnvironment(train_df)
     norm_params = {'means': env.means.to_dict(), 'stds': env.stds.to_dict()}
     if os.path.exists(f"{model_path}.zip"):
@@ -477,26 +477,29 @@ def get_or_train_model_sync(symbol, train_df, models_dir, best_params=None):
                 net_arch=dict(pi=net_arch, vf=net_arch),
                 activation_fn=activation_fn
             )
-            model = PPO('MlpPolicy',
-                        env,
-                        learning_rate=best_params['learning_rate'],
-                        n_steps=best_params['n_steps'],
-                        gamma=best_params['gamma'],
-                        ent_coef=best_params['ent_coef'],
-                        vf_coef=best_params['vf_coef'],
-                        max_grad_norm=best_params['max_grad_norm'],
-                        policy_kwargs=policy_kwargs,
-                        tensorboard_log="./ppo_tensorboard/",
-                        verbose=1,
-                        device="cpu")
+            model = PPO(
+                "MlpPolicy",
+                env,
+                learning_rate=best_params["learning_rate"],
+                n_steps=best_params["n_steps"],
+                gamma=best_params["gamma"],
+                ent_coef=best_params["ent_coef"],
+                vf_coef=best_params["vf_coef"],
+                max_grad_norm=best_params["max_grad_norm"],
+                policy_kwargs=policy_kwargs,
+                tensorboard_log=f"./tensorboard_{MODEL_SUFFIX}/",
+                verbose=1,
+                device="cpu",
+            )
         else:
             model = PPO(
                 "MlpPolicy",
                 env,
-                tensorboard_log="./ppo_tensorboard/",
+                tensorboard_log=f"./tensorboard_{MODEL_SUFFIX}/",
                 verbose=1,
                 device="cpu",
             )
+        # TIMESTEPS = 50000
         model.learn(total_timesteps=500000)
         model.save(model_path)
         with open(norm_path, 'w') as f:
@@ -516,9 +519,10 @@ def backtest_model_sync(model, test_df, symbol, norm_params):
 def objective_sync(trial, train_df, test_df):
     try:
         logging.debug(f"Начало оптимизации trial {trial.number}")
-        learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-3, log=True)
-        n_steps = trial.suggest_categorical('n_steps', [128, 256, 512])
-        gamma = trial.suggest_float('gamma', 0.9, 0.9999)
+        learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-3, log=True)
+        n_steps = trial.suggest_categorical('n_steps', [128, 256])
+        gamma = trial.suggest_float('gamma', 0.95, 0.99)
+        
         ent_coef = trial.suggest_float('ent_coef', 1e-8, 1e-2, log=True)
         vf_coef = trial.suggest_float('vf_coef', 0.1, 1.0)
         max_grad_norm = trial.suggest_float('max_grad_norm', 0.3, 5.0)
@@ -538,6 +542,8 @@ def objective_sync(trial, train_df, test_df):
             net_arch=dict(pi=net_arch, vf=net_arch),
             activation_fn=activation_fn
         )
+        
+        
         env = TradingEnvironment(train_df)
         means = env.means.to_dict()
         stds = env.stds.to_dict()
@@ -552,7 +558,7 @@ def objective_sync(trial, train_df, test_df):
             vf_coef=vf_coef,
             max_grad_norm=max_grad_norm,
             policy_kwargs=policy_kwargs,
-            tensorboard_log="./ppo_tensorboard/",
+            tensorboard_log=f"./tensorboard_{MODEL_SUFFIX}/",
             verbose=0,
             device="cpu",
         )
@@ -569,7 +575,7 @@ def objective_sync(trial, train_df, test_df):
         logging.debug(f"Trial {trial.number} завершен с наградой {total_reward}")
         return total_reward
     except Exception as e:
-        logging.error(f"Ошибка в trial {trial.number}: {e}")
+        logging.error(f"Ошибка в trial {trial.number}: {e}\n", exc_info=True)
         return float('-inf')
 
 async def run_optuna(study, train_df, test_df, n_trials):
@@ -583,7 +589,7 @@ async def run_optuna(study, train_df, test_df, n_trials):
     executor.shutdown(wait=True)
 
 class LiveTradingState:
-    def __init__(self, window_size=20):
+    def __init__(self, window_size=48):
         self.window_size = window_size
         self.data = deque(maxlen=window_size)
         self.balance_history = deque(maxlen=window_size)
@@ -642,7 +648,7 @@ async def live_trading(async_exchange, model, symbol, norm_params, state):
                 obs = normalized_df.values.flatten().astype(np.float32)
                 logging.debug(f"Наблюдение сформировано: {obs.shape}")
             except Exception as e:
-                logging.error(f"Ошибка при нормализации данных: {e}")
+                logging.error(f"Ошибка при нормализации данных: {e}\n", exc_info=True)
                 await asyncio.sleep(trading_interval)
                 continue
             if obs.shape[0] != model.observation_space.shape[0]:
@@ -685,7 +691,7 @@ async def live_trading(async_exchange, model, symbol, norm_params, state):
                     order = await async_exchange.create_order(symbol=symbol, type='market', side='sell', amount=amount)
             # Действие 0: удерживать позицию, никаких действий не требуется
         except Exception as e:
-            logging.error(f"Ошибка в live_trading: {e}")
+            logging.error(f"Ошибка в live_trading: {e}\n", exc_info=True)
         await asyncio.sleep(trading_interval)
 
 async def main():
@@ -696,7 +702,7 @@ async def main():
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, shutdown_handler)
     async_exchange = ccxt_async.bybit(exchange_config)
-    if TRADE_MODE == "DEMO":  
+    if ACC_MODE == "DEMO":  
         async_exchange.enable_demo_trading(True)  # Включаем режим демо-счета
 
     # Получение баланса для проверки подключения
@@ -708,8 +714,13 @@ async def main():
     executor = ThreadPoolExecutor()
     try:
         symbol = SYMBOL  
-        models_dir = MODELS_DIR  
+        models_dir = MODELS_DIR      
+
         os.makedirs(models_dir, exist_ok=True)
+
+        model_path = f'{models_dir}/{symbol.replace("/", "_").split(":")[0]}_{MODEL_SUFFIX}'
+        norm_path = f'{model_path}_norm.json'
+
         if not await verify_symbol(async_exchange, symbol):
             logging.error(f"Символ {symbol} недоступен")
             return
@@ -725,17 +736,19 @@ async def main():
                 await run_optuna(study, train_df, test_df, n_trials=15)
                 best_params = study.best_params
                 logging.info(f"Лучшие параметры оптимизации: {best_params}")
+                with open(f'{model_path}_best_param.json', "w") as f:
+                    json.dump(best_params, f)
+                logging.info(f"Лучшие параметры оптимизации сохранены в : {best_params}")
                 model, norm_params = await loop.run_in_executor(executor, get_or_train_model_sync, symbol, train_df, models_dir, best_params)
 
-            if RUN_MODE == "TRADE_ONLY":  # Сразу загружаем модель
-                model_path = f'{models_dir}/{symbol.replace("/", "_").replace(":", "_")}_ppo'
-                norm_path = f'{model_path}_norm.json'
+            if RUN_MODE == "TRADE_ONLY" or BK_DIR:  # Сразу загружаем модель
                 with open(norm_path, 'r') as f:
                     norm_params = json.load(f)
                 logging.info("Нормализованные параметры загружены успешно")
                 # logging.info(f"{norm_params=}")
                 model = PPO.load(model_path, device="cpu")
-                logging.info("Модель загружена успешно")
+                logging.info(f"Модель {model_path}.zip загружена успешно" )
+                # await is_continue(exchange=async_exchange)
 
             if BK_DIR:  
                 file_path = create_file_path(symbol, timeframe=TIMEFRAME, data_dir=BK_DIR)  
@@ -744,6 +757,7 @@ async def main():
                 mask = create_date_mask(df, start_date=BK_START, end_date=BK_END)  
                 test_df = df[mask]
                 logging.info(f"Бэктест с {test_df["timestamp"].iloc[1]} по {test_df["timestamp"].iloc[-1]}")
+                # await is_continue(exchange=async_exchange)
                 if test_df is not None and not test_df.empty:
                     test_df = add_technical_indicators(test_df)
                     test_df = test_df.reset_index(drop=True)
@@ -751,13 +765,13 @@ async def main():
                     logging.error("Не удалось загрузить данные или данные пусты")
                     await is_continue(exchange=async_exchange, exit=True)
                 # await is_continue(exchange=async_exchange)
-                norm_params = None
 
             await loop.run_in_executor(executor, backtest_model_sync, model, test_df, symbol, norm_params)
             await is_continue(exchange=async_exchange, exit=True)
-            
+
             if RUN_MODE == "TRADE_ONLY":
-                state = LiveTradingState(window_size=20)
+
+                state = LiveTradingState(window_size=48)
                 last_20_data = test_df.tail(state.window_size)
                 initial_balance = await get_real_balance_async(async_exchange)
                 if initial_balance is None:
@@ -770,7 +784,7 @@ async def main():
     except asyncio.CancelledError:
         logging.info("Задачи были отменены")
     except Exception as e:
-        logging.error(f"Ошибка в main: {e}")
+        logging.error(f"Ошибка в main: {e}\n", exc_info=True)
     finally:
         await async_exchange.close()
         executor.shutdown(wait=True)

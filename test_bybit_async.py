@@ -34,7 +34,7 @@ async def get_real_balance(exchange):
         logging.debug(f"Текущий баланс: {real_balance} USDT")
         return real_balance
     except Exception as e:
-        logging.error(f"Ошибка при получении баланса: {e}")
+        logging.error(f"Ошибка при получении баланса: {e}\n", exc_info=True)
         return None
     finally:
         await exchange.close()  # Закрываем соединение

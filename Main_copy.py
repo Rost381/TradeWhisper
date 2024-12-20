@@ -38,8 +38,8 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-API_KEY = os.getenv("API_KEY", "TAHqn***xGhVmof2E")
-API_SECRET = os.getenv("API_SECRET", "0QVQhcRx6SP1uZ****BJDIiQKqN1")
+API_KEY = os.getenv("API_KEY", "Fz0qIF8MhD5RLi9Gw2")
+API_SECRET = os.getenv("API_SECRET", "J2yY1qFBLGDTomrS0oxIXbRss6IhnOTldXfR")
 
 exchange_config = {
     'apiKey': API_KEY,
@@ -656,8 +656,12 @@ async def main():
             await run_optuna(study, train_df, test_df, n_trials=15)
             best_params = study.best_params
             logging.info(f"Лучшие параметры оптимизации: {best_params}")
+            with open(f'models/copy_best_param.json', "w") as f:
+                json.dump(best_params, f)
+            logging.info(f"Лучшие параметры оптимизации сохранены в : {best_params}")
             model, norm_params = await loop.run_in_executor(executor, get_or_train_model_sync, symbol, train_df, models_dir, best_params)
             await loop.run_in_executor(executor, backtest_model_sync, model, test_df, symbol, norm_params)
+            input("Next Live traiding ?")
             state = LiveTradingState(window_size=20)
             last_20_data = test_df.tail(state.window_size)
             initial_balance = await get_real_balance_async(async_exchange)

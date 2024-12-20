@@ -83,4 +83,3 @@ This translation effectively conveys the significant improvement in model perfor
   - Stop-loss and take-profit automation
   - Risk percentage customization
   - Balance monitoring and automatic shutdown on significant losses
-

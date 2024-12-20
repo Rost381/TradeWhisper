@@ -39,7 +39,7 @@ def get_bybit_demo_balance():
         return usdt_balance, btc_balance
     # balance
     except ccxt.BaseError as e:
-        print(f"Ошибка при получении баланса: {e}")
+        print(f"Ошибка при получении баланса: {e}\n", exc_info=True)
         return None
 
 # Пример использования

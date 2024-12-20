@@ -12,12 +12,21 @@ from gymnasium import spaces
 import ccxt.async_support as ccxt_async
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
-from ta import trend, volatility
-from ta.momentum import RSIIndicator, StochasticOscillator, UltimateOscillator
-from ta.volume import OnBalanceVolumeIndicator, ChaikinMoneyFlowIndicator
-from ta.volatility import AverageTrueRange
-from ta.trend import IchimokuIndicator, PSARIndicator, CCIIndicator, TRIXIndicator, MACD
+
+# from ta.momentum import RSIIndicator, StochasticOscillator, UltimateOscillator
+# from ta.trend import EMAIndicator, MACD, ADXIndicator, CCIIndicator
+# from ta.volatility import BollingerBands, AverageTrueRange, DonchianChannel
+# from ta.volume import OnBalanceVolumeIndicator, ChaikinMoneyFlowIndicator
+
+
+# from ta import trend, volatility
+# from ta.momentum import RSIIndicator, StochasticOscillator, UltimateOscillator
+# from ta.volume import OnBalanceVolumeIndicator, ChaikinMoneyFlowIndicator
+# from ta.volatility import AverageTrueRange
+# from ta.trend import IchimokuIndicator, PSARIndicator, CCIIndicator, TRIXIndicator, MACD
+
 from dotenv import load_dotenv
 from collections import deque
 import signal
@@ -25,26 +34,46 @@ import copy
 import json
 import optuna
 import torch
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
 
 from tw_utils import *
+from indicacators_sets import *
+
 
 load_dotenv()
 
-# Set global var
-env_vars = [
-    "SYMBOL",
-    "TRADE_MODE",
-    "LOGS_TO_FILE",
-    "DATA_DIR",
-    "RUN_MODE",
-    "MODELS_DIR",
-    "BK_DIR",
-    "BK_START",
-    "BK_END",
-]
+# Dynamic set global vars
+# env_vars = [
+#     "SYMBOL",
+#     "TIMEFRAME",
+#     "ACC_MODE",
+#     "LOGS_TO_FILE",
+#     "DATA_DIR",
+#     "RUN_MODE",
+#     "MODELS_DIR",
+#     "BK_DIR",
+#     "BK_START",
+#     "BK_END",
+# ]
 
-globals().update({var: os.getenv(var) for var in env_vars})
+# globals().update({var: os.getenv(var) for var in env_vars})
+
+# Set global vars
+
+SYMBOL = os.getenv("SYMBOL")
+TIMEFRAME = os.getenv("TIMEFRAME")
+ACC_MODE = os.getenv("ACC_MODE")
+LOGS_TO_FILE = os.getenv("LOGS_TO_FILE")
+DATA_DIR = os.getenv("DATA_DIR")
+RUN_MODE = os.getenv("RUN_MODE")
+MODELS_DIR = os.getenv("MODELS_DIR")
+STATS_DIR = os.getenv("STATS_DIR")
+BK_DIR = os.getenv("BK_DIR")
+BK_START = os.getenv("BK_START")
+BK_END = os.getenv("BK_END")
+INDICATORS_SET = os.getenv("INDICATORS_SET")
+
 
 if sys.platform.startswith('win'):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -54,7 +83,8 @@ log_filename = f"{script_name}.log"
 
 log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 
-if LOGS_TO_FILE == "DISABLE":  # type: ignore
+
+if LOGS_TO_FILE == "DISABLE":   
     handlers = [
         logging.StreamHandler(sys.stdout),  # Вывод в консоль
     ]
@@ -70,17 +100,7 @@ logging.basicConfig(
     handlers=handlers,
 )
 
-"""SYMBOL = os.getenv("SYMBOL")
-TRADE_MODE = os.getenv("TRADE_MODE")
-LOGS_TO_FILE = os.getenv("LOGS_TO_FILE")
-DATA_DIR = os.getenv("DATA_DIR")
-RUN_MODE = os.getenv("RUN_MODE")
-MODELS_DIR = os.getenv("MODELS_DIR")
-BK_DIR = os.getenv("BK_DIR")
-BK_START = os.getenv("BK_START")
-BK_END = os.getenv("BK_END")"""
-
-if TRADE_MODE == "LIVE": # type: ignore
+if ACC_MODE == "LIVE":  
     API_KEY = os.getenv("API_KEY", None)
     API_SECRET = os.getenv("API_SECRET", None)
 else:
@@ -132,7 +152,8 @@ class TradingEnvironment(gym.Env):
         self.history = deque(maxlen=history_size)
         self.reset()
         self.save_state()
-        
+
+        # Create dataframe for stat
         if self.is_backtest:
             self.result_df = pd.DataFrame(
             columns=[
@@ -218,12 +239,12 @@ class TradingEnvironment(gym.Env):
         else:
             logging.warning("Недостаточно истории для отката")
 
-    def detect_error(self, df):
+    def detect_error(self):
         if self.balance < self.initial_balance * 0.5:
             logging.error("Баланс упал ниже половины начального значения")
             if self.is_backtest:
-                create_result_df(df)
-                sys.exit[0]
+                create_result_df(self.result_df, STATS_DIR)
+                sys.exit[1]
             return True
         return False
 
@@ -287,10 +308,10 @@ class TradingEnvironment(gym.Env):
             self.done = True
             logging.info("Достигнут конец данных")
             if self.is_backtest:
-                create_result_df(self.result_df)
+                create_result_df(self.result_df, STATS_DIR)
 
         self.balance_history.append(self.balance)
-        if self.detect_error(self.result_df):
+        if self.detect_error():
             self.handle_error()
             reward -= 10
             self.done = False
@@ -359,12 +380,12 @@ class TradingEnvironment(gym.Env):
             'atr': atr
         })
         logging.info(
-            f"Позиция закрыта: {self.position} по цене {price}, Прибыль: {profit}, Время: {timestamp}, Продолжительность: {duration*5}"
+            f"Позиция закрыта: {self.position} по цене {price}, Прибыль: {profit}, Время: {timestamp}, Продолжительность: {duration}"
         )
         if self.is_backtest:
             self.result_df.loc[
                 len(self.result_df) - 1, ["close_ts", "close_price", "duration", "profit", "balance"]
-                ] = [ timestamp, price, round((duration*5),0), profit, self.balance]
+                ] = [ timestamp, price, round((duration),0), profit, self.balance]
 
         self.position = None
         self.entry_price = 0
@@ -381,43 +402,19 @@ def calculate_rvi(df, window=10):
     logging.debug("RVI рассчитан")
     return rvi
 
+
+# Функция для добавления технических индикаторов
 def add_technical_indicators(df):
-    logging.debug("Добавление технических индикаторов")
 
-    # Сброс индекса для предотвращения ошибок из-за дубликатов
-    df = df.reset_index(drop=True)
-
-    df['rsi'] = RSIIndicator(df['close'], window=14).rsi()
-    df['ema20'] = trend.EMAIndicator(df['close'], window=20).ema_indicator()
-    macd = MACD(df['close'])
-    df['macd'] = macd.macd()
-    df['macd_signal'] = macd.macd_signal()
-    df['macd_diff'] = macd.macd_diff()
-    bollinger = volatility.BollingerBands(df['close'], window=20, window_dev=2)
-    df['bollinger_hband'] = bollinger.bollinger_hband()
-    df['bollinger_lband'] = bollinger.bollinger_lband()
-    df['stoch'] = StochasticOscillator(df['high'], df['low'], df['close'], window=14).stoch()
-    cumulative_volume = df['volume'].cumsum()
-    cumulative_volume[cumulative_volume == 0] = 1
-    df['vwap'] = (df['volume'] * (df['high'] + df['low'] + df['close']) / 3).cumsum() / cumulative_volume
-    df['atr'] = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14).average_true_range()
-    ichimoku = IchimokuIndicator(df['high'], df['low'], window1=9, window2=26, window3=52)
-    df['ichimoku_a'] = ichimoku.ichimoku_a()
-    df['ichimoku_b'] = ichimoku.ichimoku_b()
-    df['psar'] = PSARIndicator(df['high'], df['low'], df['close'], step=0.02, max_step=0.2).psar()
-    df['cci'] = CCIIndicator(df['high'], df['low'], df['close'], window=20).cci()
-    df['trix'] = TRIXIndicator(df['close'], window=15).trix()
-    df['ultimate_osc'] = UltimateOscillator(df['high'], df['low'], df['close'], window1=7, window2=14, window3=28).ultimate_oscillator()
-    df['rvi'] = calculate_rvi(df, window=10)
-    df['obv'] = OnBalanceVolumeIndicator(df['close'], df['volume']).on_balance_volume()
-    df['chaikin_money_flow'] = ChaikinMoneyFlowIndicator(df['high'], df['low'], df['close'], df['volume'], window=20).chaikin_money_flow()
-    df.bfill(inplace=True)
-    df.fillna(0, inplace=True)
-    logging.debug("Технические индикаторы добавлены")
+    if INDICATORS_SET == "original":
+        df = add_technical_indicators_original(df) # Original set
+    if INDICATORS_SET == "v1":
+        df = add_technical_indicators_v1(df)  # Original set
     return df
 
+
 # Original fn
-"""async def get_full_data(exchange, symbol, timeframe='5m', since=None, limit=2016):  # Изменено с '1m' на '5m'
+"""async def get_full_data(exchange, symbol, timeframe=TIMEFRAME, since=None, limit=2016):  # Изменено с '1m' на '5m'
     all_ohlcv = []
     logging.info(f"Начало получения данных для символа {symbol}")
     while True:
@@ -433,7 +430,7 @@ def add_technical_indicators(df):
                 logging.debug("Достигнута текущая временная метка")
                 break
         except Exception as e:
-            logging.error(f"Ошибка при получении данных: {e}")
+            logging.error(f"Ошибка при получении данных: {e}\n", exc_info=True)
             break
     df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
@@ -460,7 +457,6 @@ def get_or_train_model_sync(symbol, train_df, models_dir, best_params=None):
         logging.info("Модель загружена успешно")
     else:
         logging.info("Модель не найдена, начало обучения")
-        input("Продолжить ?")
         env = TradingEnvironment(train_df)
         means = env.means.to_dict()
         stds = env.stds.to_dict()
@@ -574,12 +570,13 @@ def objective_sync(trial, train_df, test_df):
         logging.debug(f"Trial {trial.number} завершен с наградой {total_reward}")
         return total_reward
     except Exception as e:
-        logging.error(f"Ошибка в trial {trial.number}: {e}")
+        logging.error(f"Ошибка в trial {trial.number}: {e}\n", exc_info=True)
         return float('-inf')
 
 async def run_optuna(study, train_df, test_df, n_trials):
     loop = asyncio.get_running_loop()
     executor = ThreadPoolExecutor()
+    # executor = ProcessPoolExecutor(max_workers=os.cpu_count())
     for _ in range(n_trials):
         trial = study.ask()
         score = await loop.run_in_executor(executor, objective_sync, trial, train_df, test_df)
@@ -623,7 +620,7 @@ async def live_trading(async_exchange, model, symbol, norm_params, state):
                 logging.warning("Не удалось получить баланс, ожидание перед следующей попыткой")
                 await asyncio.sleep(trading_interval)
                 continue
-            ohlcv = await async_exchange.fetch_ohlcv(symbol, timeframe='5m', limit=1)  # Изменено с '1m' на '5m'
+            ohlcv = await async_exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=1)  # Изменено с '1m' на '5m'
             if not ohlcv:
                 logging.warning("Не удалось получить новые данные OHLCV")
                 await asyncio.sleep(trading_interval)
@@ -646,7 +643,7 @@ async def live_trading(async_exchange, model, symbol, norm_params, state):
                 obs = normalized_df.values.flatten().astype(np.float32)
                 logging.debug(f"Наблюдение сформировано: {obs.shape}")
             except Exception as e:
-                logging.error(f"Ошибка при нормализации данных: {e}")
+                logging.error(f"Ошибка при нормализации данных: {e}\n", exc_info=True)
                 await asyncio.sleep(trading_interval)
                 continue
             if obs.shape[0] != model.observation_space.shape[0]:
@@ -689,18 +686,18 @@ async def live_trading(async_exchange, model, symbol, norm_params, state):
                     order = await async_exchange.create_order(symbol=symbol, type='market', side='sell', amount=amount)
             # Действие 0: удерживать позицию, никаких действий не требуется
         except Exception as e:
-            logging.error(f"Ошибка в live_trading: {e}")
+            logging.error(f"Ошибка в live_trading: {e}\n", exc_info=True)
         await asyncio.sleep(trading_interval)
 
 async def main():
-    if LOGS_TO_FILE=="NEW": # type: ignore
+    if LOGS_TO_FILE=="NEW":  
         clear_log_file(log_filename) # Удаляем логи предыдущего запука
     loop = asyncio.get_running_loop()
     if not sys.platform.startswith('win'):
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, shutdown_handler)
     async_exchange = ccxt_async.bybit(exchange_config)
-    if TRADE_MODE == "DEMO": # type: ignore
+    if ACC_MODE == "DEMO":  
         async_exchange.enable_demo_trading(True)  # Включаем режим демо-счета
 
     # Получение баланса для проверки подключения
@@ -711,43 +708,41 @@ async def main():
 
     executor = ThreadPoolExecutor()
     try:
-        symbol = SYMBOL # type: ignore
-        models_dir = MODELS_DIR # type: ignore
+        symbol = SYMBOL  
+        models_dir = MODELS_DIR  
         os.makedirs(models_dir, exist_ok=True)
         if not await verify_symbol(async_exchange, symbol):
             logging.error(f"Символ {symbol} недоступен")
             return
-        df = await get_full_data(async_exchange, symbol, timeframe='5m')  # Изменено на '5m'
+        df = await get_full_data(async_exchange, symbol, timeframe=TIMEFRAME)   # Изменено на '5m' 
         if df is not None and not df.empty:
             df = add_technical_indicators(df)
             train_size = int(len(df) * 0.8)
             train_df = df.iloc[:train_size].reset_index(drop=True)
             test_df = df.iloc[train_size:].reset_index(drop=True)
 
-            if RUN_MODE != "TRADE_ONLY": # type: ignore
+            if RUN_MODE != "TRADE_ONLY": # Обучение
                 study = optuna.create_study(direction='maximize', pruner=optuna.pruners.MedianPruner())
                 await run_optuna(study, train_df, test_df, n_trials=15)
                 best_params = study.best_params
                 logging.info(f"Лучшие параметры оптимизации: {best_params}")
                 model, norm_params = await loop.run_in_executor(executor, get_or_train_model_sync, symbol, train_df, models_dir, best_params)
 
-            if RUN_MODE == "TRADE_ONLY": # type: ignore
+            if RUN_MODE == "TRADE_ONLY":  # Сразу загружаем модель
                 model_path = f'{models_dir}/{symbol.replace("/", "_").replace(":", "_")}_ppo'
                 norm_path = f'{model_path}_norm.json'
-
                 with open(norm_path, 'r') as f:
                     norm_params = json.load(f)
-
                 logging.info("Нормализованные параметры загружены успешно")
                 # logging.info(f"{norm_params=}")
                 model = PPO.load(model_path, device="cpu")
                 logging.info("Модель загружена успешно")
 
-            if BK_DIR: # type: ignore
-                file_path = create_file_path(symbol, timeframe="5m", data_dir=BK_DIR) # type: ignore
+            if BK_DIR:  
+                file_path = create_file_path(symbol, timeframe=TIMEFRAME, data_dir=BK_DIR)  
                 logging.info(f"Для Бэктеста используется файл: {file_path}")
                 df = pd.read_csv(file_path)
-                mask = create_date_mask(df, start_date=BK_START, end_date=BK_END) # type: ignore
+                mask = create_date_mask(df, start_date=BK_START, end_date=BK_END)  
                 test_df = df[mask]
                 logging.info(f"Бэктест с {test_df["timestamp"].iloc[1]} по {test_df["timestamp"].iloc[-1]}")
                 if test_df is not None and not test_df.empty:
@@ -757,25 +752,25 @@ async def main():
                     logging.error("Не удалось загрузить данные или данные пусты")
                     await is_continue(exchange=async_exchange, exit=True)
                 # await is_continue(exchange=async_exchange)
-            norm_params = None
+
             await loop.run_in_executor(executor, backtest_model_sync, model, test_df, symbol, norm_params)
-
-            await is_continue(exchange=async_exchange)
-
-            state = LiveTradingState(window_size=20)
-            last_20_data = test_df.tail(state.window_size)
-            initial_balance = await get_real_balance_async(async_exchange)
-            if initial_balance is None:
-                initial_balance = 10
-            for _, row in last_20_data.iterrows():
-                state.update(row, initial_balance, row['timestamp'])
-            await live_trading(async_exchange, model, symbol, norm_params, state)
+            await is_continue(exchange=async_exchange, exit=True)
+            
+            if RUN_MODE == "TRADE_ONLY":
+                state = LiveTradingState(window_size=20)
+                last_20_data = test_df.tail(state.window_size)
+                initial_balance = await get_real_balance_async(async_exchange)
+                if initial_balance is None:
+                    initial_balance = 10
+                for _, row in last_20_data.iterrows():
+                    state.update(row, initial_balance, row['timestamp'])
+                await live_trading(async_exchange, model, symbol, norm_params, state)
         else:
             logging.error("Не удалось загрузить данные или данные пусты")
     except asyncio.CancelledError:
         logging.info("Задачи были отменены")
     except Exception as e:
-        logging.error(f"Ошибка в main: {e}")
+        logging.error(f"Ошибка в main: {e}\n", exc_info=True)
     finally:
         await async_exchange.close()
         executor.shutdown(wait=True)

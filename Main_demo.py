@@ -356,7 +356,7 @@ async def get_full_data(exchange, symbol, timeframe='5m', since=None, limit=2000
                 logging.debug("Достигнута текущая временная метка")
                 break
         except Exception as e:
-            logging.error(f"Ошибка при получении данных: {e}")
+            logging.error(f"Ошибка при получении данных: {e}\n", exc_info=True)
             break
     df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
@@ -372,7 +372,7 @@ async def list_available_symbols(exchange):
         logging.debug("Рынки загружены")
         return exchange.symbols
     except Exception as e:
-        logging.error(f"Ошибка при загрузке рынков: {e}")
+        logging.error(f"Ошибка при загрузке рынков: {e}\n", exc_info=True)
         return []
 
 async def verify_symbol(exchange, symbol):
@@ -382,7 +382,7 @@ async def verify_symbol(exchange, symbol):
         logging.debug(f"Проверка символа {symbol}: {'доступен' if is_valid else 'недоступен'}")
         return is_valid
     except Exception as e:
-        logging.error(f"Ошибка при проверке символа: {e}")
+        logging.error(f"Ошибка при проверке символа: {e}\n", exc_info=True)
         return False
 
 def get_or_train_model_sync(symbol, train_df, models_dir, best_params=None):
@@ -522,7 +522,7 @@ def objective_sync(trial, train_df, test_df):
         logging.debug(f"Trial {trial.number} завершен с наградой {total_reward}")
         return total_reward
     except Exception as e:
-        logging.error(f"Ошибка в trial {trial.number}: {e}")
+        logging.error(f"Ошибка в trial {trial.number}: {e}\n", exc_info=True)
         return float('-inf')
 
 async def run_optuna(study, train_df, test_df, n_trials):
@@ -541,7 +541,7 @@ def get_real_balance_sync(exchange):
         logging.debug(f"Текущий баланс: {real_balance} USDT")
         return real_balance
     except Exception as e:
-        logging.error(f"Ошибка при получении баланса: {e}")
+        logging.error(f"Ошибка при получении баланса: {e}\n", exc_info=True)
         return None
 
 class LiveTradingState:
@@ -577,7 +577,7 @@ async def get_real_balance_async(exchange):
         logging.debug(f"Текущий баланс (асинхронно): {real_balance} USDT")
         return real_balance
     except Exception as e:
-        logging.error(f"Ошибка при получении баланса: {e}")
+        logging.error(f"Ошибка при получении баланса: {e}\n", exc_info=True)
         return None
 
 async def live_trading(async_exchange, model, symbol, norm_params, state):
@@ -614,7 +614,7 @@ async def live_trading(async_exchange, model, symbol, norm_params, state):
                 obs = normalized_df.values.flatten().astype(np.float32)
                 logging.debug(f"Наблюдение сформировано: {obs.shape}")
             except Exception as e:
-                logging.error(f"Ошибка при нормализации данных: {e}")
+                logging.error(f"Ошибка при нормализации данных: {e}\n", exc_info=True)
                 await asyncio.sleep(trading_interval)
                 continue
             if obs.shape[0] != model.observation_space.shape[0]:
@@ -657,7 +657,7 @@ async def live_trading(async_exchange, model, symbol, norm_params, state):
                     order = await async_exchange.create_order(symbol=symbol, type='market', side='sell', amount=amount)
             # Действие 0: удерживать позицию, никаких действий не требуется
         except Exception as e:
-            logging.error(f"Ошибка в live_trading: {e}")
+            logging.error(f"Ошибка в live_trading: {e}\n", exc_info=True)
         await asyncio.sleep(trading_interval)
 
 def shutdown_handler():
@@ -680,7 +680,7 @@ def clear_log_file(filename):
                 pass
         # Если файл не существует, он будет создан при записи логов
     except Exception as e:
-        print(f"Ошибка при очистке файла логов: {e}")
+        print(f"Ошибка при очистке файла логов: {e}\n", exc_info=True)
 
 
 async def main():
@@ -726,7 +726,7 @@ async def main():
     except asyncio.CancelledError:
         logging.info("Задачи были отменены")
     except Exception as e:
-        logging.error(f"Ошибка в main: {e}")
+        logging.error(f"Ошибка в main: {e}\n", exc_info=True)
     finally:
         await async_exchange.close()
         executor.shutdown(wait=True)

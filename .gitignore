@@ -71,3 +71,4 @@ venv
 data/
 media/
 .pip-cache
+.bak

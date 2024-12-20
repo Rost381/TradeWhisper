@@ -1,0 +1,17 @@
+Metric,Value
+start,2024-12-01 02:40:00
+Stop ,2024-12-11 19:05:00
+Ratio positive profit to all trades (%),41.46
+Ratio positive profit to long trades (%),40.24
+Ratio positive profit to short trades (%),42.68
+Total positive profit,68
+Total positive profit (long),33
+Total positive profit (short),35
+Ratio diff_PCT > 0.2 to all trades (%),48.170731707317074
+Max profit trade,0.27089336600441727
+Min profit trade,-0.42430434885959767
+Max profit trade (long),0.27089336600441727
+Min profit trade (long),-0.42430434885959767
+Max profit trade (short),0.212907618814077
+Min profit trade (short),-0.3201424171039807
+Total Deals,164
