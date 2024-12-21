@@ -41,26 +41,29 @@ from tw_utils import *
 from indicacators_sets import *
 
 
-# load_dotenv(".env-bk", override=True)
-load_dotenv(".env-learn", override=True)
 
 # Set global vars
-
+load_dotenv()
+RUN_MODE = os.getenv("RUN_MODE")   
 SYMBOL = os.getenv("SYMBOL")
 TIMEFRAME = os.getenv("TIMEFRAME")
 ACC_MODE = os.getenv("ACC_MODE")
-LOGS_TO_FILE = os.getenv("LOGS_TO_FILE")
 DATA_DIR = os.getenv("DATA_DIR")
-RUN_MODE = os.getenv("RUN_MODE")
 MODELS_DIR = os.getenv("MODELS_DIR")
 STATS_DIR = os.getenv("STATS_DIR")
-BK_DIR = os.getenv("BK_DIR")
-BK_START = os.getenv("BK_START")
-BK_END = os.getenv("BK_END")
-INDICATORS_SET = os.getenv("INDICATORS_SET")
 MODEL_SUFFIX = os.getenv("MODEL_SUFFIX")
 
 STATS_DIR = f"{STATS_DIR}_{MODEL_SUFFIX}"
+
+if RUN_MODE=="BK":
+   load_dotenv(".env-bk", override=True)   
+
+    
+BK_DIR = os.getenv("BK_DIR", None)
+BK_START = os.getenv("BK_START")
+BK_END = os.getenv("BK_END")    
+LOGS_TO_FILE = os.getenv("LOGS_TO_FILE")
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 
 if sys.platform.startswith('win'):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -71,9 +74,6 @@ if not os.path.exists(STATS_DIR):
 
 script_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
 log_filename = f"{script_name}.log"
-
-log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-
 
 if LOGS_TO_FILE == "DISABLE":   
     handlers = [
@@ -110,8 +110,21 @@ exchange_config = {
     'timeout': 30000
 }
 
+if MODEL_SUFFIX[:2] == "L0":
+    get_data_limit = 2000
+    model_history_size=100
+    model_window_size=20 
+elif MODEL_SUFFIX[:2] == "L1":
+    get_data_limit = 4320   
+    model_history_size=240
+    model_window_size=48 
+else:
+    logging.error("Need suffix")
+    sys.exit(1)
+
 class TradingEnvironment(gym.Env):
-    def __init__(self, data, norm_params=None, is_backtest=False, initial_balance=10, risk_percentage=0.7, short_term_threshold=10, long_term_threshold=50, history_size=240, window_size=48):
+    def __init__(self, data, norm_params=None, is_backtest=False, initial_balance=10, risk_percentage=0.7, 
+                 short_term_threshold=10, long_term_threshold=50, history_size=model_history_size, window_size=model_window_size):
         super(TradingEnvironment, self).__init__()
         logging.debug("Initializing TradingEnvironment")
         self.is_backtest = is_backtest
@@ -159,7 +172,6 @@ class TradingEnvironment(gym.Env):
                 "balance",
             ]
         )
-
     def reset(self, *, seed=None, options=None):
         logging.debug("Resetting environment")
         self.balance = self.initial_balance
@@ -232,7 +244,7 @@ class TradingEnvironment(gym.Env):
 
     def detect_error(self):
         if self.balance < self.initial_balance * 0.5:
-            logging.error("Баланс упал ниже 50% начального")
+            logging.error("Баланс упал ниже 50%")
             # Пишем результат в df
             if self.is_backtest:
                 create_result_df(self.result_df, STATS_DIR)
@@ -406,8 +418,18 @@ def calculate_rvi(df, window=10):
 
 # Функция для добавления технических индикаторов
 def add_technical_indicators(df):
-
-    df = add_technical_indicators_original(df) # Original set
+    
+    if MODEL_SUFFIX[-2:] == "V0":
+        df = add_technical_indicators_v0(df) #empty
+    elif MODEL_SUFFIX[-2:] == "V1":
+        df = add_technical_indicators_original(df) 
+    elif MODEL_SUFFIX[-2:] == "V2":
+        df = add_technical_indicators_v2(df) #v1
+    elif MODEL_SUFFIX[-2:] == "V3":
+        df = add_technical_indicators_v3(df) #Bill Williams
+    else:
+        logging.error("Нужен суффикс модели")  
+        return None 
 
     return df
 
@@ -440,7 +462,7 @@ def add_technical_indicators(df):
 def get_or_train_model_sync(symbol, train_df, models_dir, best_params=None):
     logging.info(f"Получение или обучение модели для символа {symbol}")
 
-    model_path = f'{models_dir}/{symbol.replace("/", "_").split(":")[0]}_{MODEL_SUFFIX}'
+    model_path = f'{models_dir}/{symbol.replace("/", "_").split(":")[0]}'
     norm_path = f'{model_path}_norm.json'
 
     env = TradingEnvironment(train_df)
@@ -499,9 +521,11 @@ def get_or_train_model_sync(symbol, train_df, models_dir, best_params=None):
                 verbose=1,
                 device="cpu",
             )
-        # TIMESTEPS = 50000
-        model.learn(total_timesteps=500000)
-        model.save(model_path)
+        TIMESTEPS = 10000
+        for i in range(1, 50):
+            model.learn(total_timesteps=TIMESTEPS, reset_num_timesteps=False)
+            model.save(f"model_path_{TIMESTEPS*i}")     
+        model.save(model_path)    
         with open(norm_path, 'w') as f:
             json.dump(norm_params, f)
         logging.info("Модель обучена и сохранена")
@@ -714,17 +738,17 @@ async def main():
     executor = ThreadPoolExecutor()
     try:
         symbol = SYMBOL  
-        models_dir = MODELS_DIR      
-
+        models_dir = f"{MODELS_DIR}_{MODEL_SUFFIX}"    
         os.makedirs(models_dir, exist_ok=True)
 
-        model_path = f'{models_dir}/{symbol.replace("/", "_").split(":")[0]}_{MODEL_SUFFIX}'
+        model_path = f'{models_dir}/{symbol.replace("/", "_").split(":")[0]}'
         norm_path = f'{model_path}_norm.json'
 
         if not await verify_symbol(async_exchange, symbol):
             logging.error(f"Символ {symbol} недоступен")
             return
-        df = await get_full_data(async_exchange, symbol, timeframe=TIMEFRAME)   # Изменено на '5m' 
+        
+        df = await get_full_data(async_exchange, symbol, timeframe=TIMEFRAME, limit=get_data_limit)   # Изменено на '5m' 
         if df is not None and not df.empty:
             df = add_technical_indicators(df)
             train_size = int(len(df) * 0.8)
@@ -755,9 +779,12 @@ async def main():
                 logging.info(f"Для Бэктеста используется файл: {file_path}")
                 df = pd.read_csv(file_path)
                 mask = create_date_mask(df, start_date=BK_START, end_date=BK_END)  
+   
                 test_df = df[mask]
                 logging.info(f"Бэктест с {test_df["timestamp"].iloc[1]} по {test_df["timestamp"].iloc[-1]}")
+                
                 # await is_continue(exchange=async_exchange)
+                
                 if test_df is not None and not test_df.empty:
                     test_df = add_technical_indicators(test_df)
                     test_df = test_df.reset_index(drop=True)

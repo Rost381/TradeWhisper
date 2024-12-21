@@ -1,6 +1,6 @@
 import logging
 import numpy as np
-from ta import trend, volatility
+from ta import trend, volatility, momentum
 from ta.momentum import RSIIndicator, StochasticOscillator, UltimateOscillator
 from ta.volume import OnBalanceVolumeIndicator, ChaikinMoneyFlowIndicator
 from ta.volatility import AverageTrueRange
@@ -78,6 +78,15 @@ def calculate_rvi(df, window=10):
     return rvi
 
 # ------------------
+def add_technical_indicators_v0(df):
+    logging.debug("Добавление технических индикаторов")
+    df['atr'] = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14).average_true_range()
+    df.bfill(inplace=True)
+    df.fillna(0, inplace=True)
+    logging.debug("Технические индикаторы добавлены")
+    return df
+
+# ------------------
 def add_technical_indicators_original(df):
     logging.debug("Добавление технических индикаторов")
     df['rsi'] = RSIIndicator(df['close'], window=14).rsi()
@@ -110,7 +119,7 @@ def add_technical_indicators_original(df):
     return df
 # ------------------
 
-def add_technical_indicators_v1(df):
+def add_technical_indicators_v2(df):
     logging.debug("Добавление технических индикаторов")
     df = df.copy()
 
@@ -158,5 +167,43 @@ def add_technical_indicators_v1(df):
     # logging.debug("Данные старшего таймфрейма добавлены")
 
     return df
+#-------------------------------------------------------------------
+# v2 Bill
 
+def add_technical_indicators_v3(df):
+    logging.debug("Добавление технических индикаторов")
+    df = df.copy()
+    
+    df['atr'] = AverageTrueRange(df['high'], df['low'], df['close'], window=14).average_true_range()
+    # Alligator (челюсти, зубы, губы)
+    df['alligator_jaw'] = trend.SMAIndicator(df['close'], window=13).sma_indicator()
+    df['alligator_teeth'] = trend.SMAIndicator(df['close'], window=8).sma_indicator()
+    df['alligator_lips'] = trend.SMAIndicator(df['close'], window=5).sma_indicator()
 
+    # Awesome Oscillator (AO)
+    ao = momentum.AwesomeOscillatorIndicator(df['high'], df['low'])
+    df['ao'] = ao.awesome_oscillator()
+
+    # Accelerator Oscillator (AC)
+    df['ac'] = df['ao'] - trend.SMAIndicator(df['ao'], window=5).sma_indicator()
+
+    # Gator Oscillator
+    df['gator_upper'] = abs(df['alligator_lips'] - df['alligator_teeth'])
+    df['gator_lower'] = abs(df['alligator_teeth'] - df['alligator_jaw'])
+
+    # Market Facilitation Index (MFI)
+    df['mfi'] = (df['high'] - df['low']) / df['volume']
+
+    # Bollinger Bands
+    bollinger = volatility.BollingerBands(close=df['close'], window=20, window_dev=2)
+    df['bb_upper'] = bollinger.bollinger_hband()
+    df['bb_lower'] = bollinger.bollinger_lband()
+    df['bb_middle'] = bollinger.bollinger_mavg()
+
+# === Логика фракталов ===
+    df = calculate_fractals(df, window=5)  # 5 свечей
+    df[["fractal_high", "fractal_low"]] = df[["fractal_high", "fractal_low"]].fillna(method="ffill")
+
+    df.dropna(inplace=True)
+
+    return df

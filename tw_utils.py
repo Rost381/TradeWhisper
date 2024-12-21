@@ -12,6 +12,8 @@ load_dotenv()
 
 
 DATA_DIR = os.getenv("DATA_DIR", "futures_data")
+MODEL_SUFFIX = os.getenv("MODEL_SUFFIX")
+
 
 
 async def is_continue(exchange, exit=False):
@@ -39,7 +41,7 @@ def create_file_path(symbol, timeframe, data_dir=DATA_DIR) -> str:  # type: igno
 
 
 # New fn with save df
-async def get_full_data(exchange, symbol, timeframe=None, since=None, limit=4320):
+async def get_full_data(exchange, symbol, timeframe=None, since=None, limit=None):
     return_limit = limit  # Количество возврашаемых свечей
     all_ohlcv = []
     logging.info(f"Начало получения данных для символа {symbol}")
@@ -222,7 +224,7 @@ def clear_log_file(filename):
 
 
 def create_date_mask(df, start_date, end_date):
-    # Логика фильтрации
+    # Логика фильтрации для create_result_df
     if start_date and end_date:
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
         # Фильтрация по диапазону дат
@@ -263,7 +265,7 @@ def create_result_df(df, stat_dir):
     else:
         print("No data to save")
     # Рсчет статистики
-    df = df[: len(df)-1]
+    # df = df[: len(df)-1]
     # Метрики для расчёта
     # 1. Общее количество diff_PCT > 0.2 и процентное отношение к количеству сделок
     total_diff_pct_gt_0_2 = df[df["diff_PCT"] > 0.2].shape[0]
@@ -334,6 +336,33 @@ def create_result_df(df, stat_dir):
     begin_ts = df["open_ts"].iloc[1]
     end_ts = df["close_ts"].iloc[-1]
 
+    # Дополнительный расчет  статистики
+    # Фильтруем сделки по типам
+    long_trades = df[df["type"] == "long"]
+    short_trades = df[df["type"] == "short"]
+
+    # Расчет для сделок long
+    total_long_profit = long_trades[long_trades["profit"] > 0]["profit"].sum()
+    total_long_loss = long_trades[long_trades["profit"] < 0]["profit"].sum()
+    long_profit_loss_ratio = (
+        (total_long_profit / abs(total_long_loss)) * 100
+        if total_long_loss != 0
+        else float("inf")
+    )
+
+    # Расчет для сделок short
+    total_short_profit = short_trades[short_trades["profit"] > 0]["profit"].sum()
+    total_short_loss = short_trades[short_trades["profit"] < 0]["profit"].sum()
+    short_profit_loss_ratio = (
+        (total_short_profit / abs(total_short_loss)) * 100
+        if total_short_loss != 0
+        else float("inf")
+    )
+
+    # Разницы между прибыльными и убыточными сделками
+    long_profit_loss_diff = total_long_profit + total_long_loss
+    short_profit_loss_diff = total_short_profit + total_short_loss
+
     # Итоговый DataFrame с результатами
     summary_df = pd.DataFrame(
         {
@@ -344,18 +373,29 @@ def create_result_df(df, stat_dir):
                 "Ratio positive profit to all trades (%)",
                 "Ratio positive profit to long trades (%)",
                 "Ratio positive profit to short trades (%)",
-                "Total positive profit",
-                "Total positive profit (long)",
-                "Total positive profit (short)",
-                "Ratio diff_PCT > 0.2 to all trades (%)",
+                "Total positive trades",
+                "Total positive trades (long)",
+                "Total positive trades (short)",
                 
+                "Total profit (long)",
+                "Total loss  (long)",
+                "Ratio (%) profit/loss (long)",
+                "PL (long)",
+                
+                "Total profit (short)",
+                "Total loss  (short)",
+                "Ratio (%) profit/loss (short)",             
+                "PL (short)",
+                
+            
+                
+                "Ratio diff_PCT > 0.2 to all trades (%)",
                 "Max profit trade",
                 "Min profit trade",
                 "Max profit trade (long)",
                 "Min profit trade (long)",
                 "Max profit trade (short)",
                 "Min profit trade (short)",
-                
                 "Total Deals",
                 # "Total diff_PCT > 0.2 (long)",
                 # "Ratio diff_PCT > 0.2 to long trades (%)",
@@ -370,15 +410,24 @@ def create_result_df(df, stat_dir):
                 total_positive_profit,
                 long_positive_profit,
                 short_positive_profit,
-                diff_pct_gt_0_2_ratio,
                 
+                total_long_profit,
+                total_long_loss,
+                round(long_profit_loss_ratio,2),
+                long_profit_loss_diff,
+                
+                total_short_profit,
+                total_short_loss,
+                round(short_profit_loss_ratio,2), 
+                short_profit_loss_diff,
+                
+                round(diff_pct_gt_0_2_ratio,2),
                 max_profit_trade,
                 min_profit_trade,
                 max_profit_long,
                 min_profit_long,
                 max_profit_short,
                 min_profit_short,
-                
                 total_trades,
                 # long_diff_pct_gt_0_2,
                 # long_diff_pct_gt_0_2_ratio,
