@@ -1,0 +1,30 @@
+Metric,Value
+Start Date: ,2024-12-24 03:55:00
+Stop Date:  ,2024-12-26 16:05:00
+Ratio positive profit to all trades (%): ,27.78
+Ratio positive profit to long trades (%): ,26.32
+Ratio positive profit to short trades (%): ,0
+Total positive trades: ,5
+Total positive trades (long):  ,5
+Total positive trades (short): ,0
+Total profit (long): ,0.10491911891618934
+Total loss  (long): ,-0.3485912569804266
+Ratio profit/loss (long): ,0.3
+PL (long): ,-0.24367213806423726
+Total profit (short): ,0
+Total loss  (short): ,0
+Ratio profit/loss (short): ,inf
+PL (short): ,0
+Ratio diff_PCT > 0.2 to all trades (%): ,27.78
+Max profit trade: ,0.08343426389437515
+Max loss trade: ,-0.04329809032012469
+Max profit trade (long): ,0.08343426389437515
+Max loss trade (long): ,-0.04329809032012469
+Max profit trade (short): ,
+Max loss trade (short): ,
+Max duration (long): ,74
+Mean duration (long): ,11.33
+Max duration  (short): ,
+Mean duration (short): ,
+Balance: ,9.756327861935764
+Total Deals: ,19

@@ -1,7 +1,0 @@
-{
-    "TIMEFRAME": "5m",
-    "SYMBOL": "DOGE/USDT:USDT",
-    "MODEL_WINDOWS_SIZE": 48,
-    "MODEL_HISTORY_SIZE": 240,
-    "GET_DATA_LIMIT": 4320
-}

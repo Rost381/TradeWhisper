@@ -14,6 +14,8 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
+from datetime import timedelta
+from functools import partial
 
 
 from dotenv import load_dotenv
@@ -24,15 +26,18 @@ import json
 import optuna
 import torch
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+import time                             
+import matplotlib
 
 
 from tw_utils import *
 from indicacators_sets import *
+from plot_tw import plot_result
 
-
+matplotlib.use('Agg')
 
 # Set global vars
-load_dotenv()
+load_dotenv(override=True)
 
 RUN_MODE = os.getenv("RUN_MODE")   
 SYMBOL = os.getenv("SYMBOL")
@@ -41,17 +46,33 @@ ACC_MODE = os.getenv("ACC_MODE")
 DATA_DIR = os.getenv("DATA_DIR")
 MODELS_DIR = os.getenv("MODELS_DIR")
 STATS_DIR = os.getenv("STATS_DIR")
-MODEL_SUFFIX = os.getenv("MODEL_SUFFIX")
-
-STATS_DIR = f"{STATS_DIR}_{MODEL_SUFFIX}"
+MODEL_SUFFIX = os.getenv("MODEL_SUFFIX", None)
 
 if RUN_MODE=="BK":
-   load_dotenv(".env-bk", override=True)     
+   load_dotenv(".env-bk", )
+        
 BK_DIR = os.getenv("BK_DIR", None)
 BK_START = os.getenv("BK_START")
 BK_END = os.getenv("BK_END")    
 LOGS_TO_FILE = os.getenv("LOGS_TO_FILE")
-log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+MODEL_FILE_SUFFIX = os.getenv("MODEL_FILE_SUFFIX") 
+BK_PERIOD = os.getenv("BK_PERIOD") 
+log_level = os.getenv("LOG_LEVEL", "ERROR").upper()
+
+
+args = parse_arguments()
+model_suffix_cmd = args.suffix
+if model_suffix_cmd:
+    MODEL_SUFFIX = model_suffix_cmd
+    
+# print(f"{MODEL_SUFFIX=}")
+# input()    
+    
+if MODEL_SUFFIX == '' or RUN_MODE is None:
+    print("Need 'RUN_MODE' and model suffix. Exit..")
+    sys.exit(0)     
+
+STATS_DIR = f"{STATS_DIR}_{MODEL_SUFFIX}"         
 
 if sys.platform.startswith('win'):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -102,24 +123,50 @@ elif MODEL_SUFFIX[:2] == "L1":
     GET_DATA_LIMIT = 4320   
     MODEL_HISTORY_SIZE=240
     MODEL_WINDOWS_SIZE=48 
+elif MODEL_SUFFIX[:2] == "L2":
+    GET_DATA_LIMIT = 4320  
+    MODEL_HISTORY_SIZE=100
+    MODEL_WINDOWS_SIZE=20
+elif MODEL_SUFFIX[:2] == "L3":
+    GET_DATA_LIMIT = 1000  
+    MODEL_HISTORY_SIZE=100
+    MODEL_WINDOWS_SIZE=20
+elif MODEL_SUFFIX[:2] == "L4":
+    GET_DATA_LIMIT = 2000  
+    MODEL_HISTORY_SIZE=240
+    MODEL_WINDOWS_SIZE=48
+elif MODEL_SUFFIX[:2] == "L5":
+    GET_DATA_LIMIT = 1000  
+    MODEL_HISTORY_SIZE=240
+    MODEL_WINDOWS_SIZE=48
 else:
     logging.error("Need suffix")
     sys.exit(1)
+
+if MODEL_SUFFIX[2:4] == "R0":
+    REWARD_CLOSE_MULT = 1
+else:
+    REWARD_CLOSE_MULT = 100
 
 if not os.path.exists(STATS_DIR):
     os.makedirs(STATS_DIR)
     
 with open(f"{STATS_DIR}/model_param.json", 'w') as f:
     model_param ={
+        "SUFFIX": MODEL_SUFFIX,
         "SYMBOL" : SYMBOL,
         "TIMEFRAME" : TIMEFRAME,
         "GET_DATA_LIMIT": GET_DATA_LIMIT,
         "MODEL_HISTORY_SIZE" : MODEL_HISTORY_SIZE,
-        "MODEL_WINDOWS_SIZE" : MODEL_WINDOWS_SIZE
+        "MODEL_WINDOWS_SIZE" : MODEL_WINDOWS_SIZE,
+        "REWARD_CLOSE_MULT" : REWARD_CLOSE_MULT
         
     }  
     json.dump(model_param, f)
-
+    
+print(f"{RUN_MODE=}")       
+print(f"{MODEL_SUFFIX=}")   
+# sys.exit(0)
 class TradingEnvironment(gym.Env):
     def __init__(self, data, norm_params=None, is_backtest=False, initial_balance=10, risk_percentage=0.7, 
                  short_term_threshold=10, long_term_threshold=50, history_size=MODEL_HISTORY_SIZE, window_size=MODEL_WINDOWS_SIZE):
@@ -368,7 +415,7 @@ class TradingEnvironment(gym.Env):
         self.balance += profit
         self.total_profit += profit
         reward = profit / self.position_size
-        reward = reward * 100
+        reward = reward * REWARD_CLOSE_MULT
         # Удаляем влияние тейк-профита и стоп-лосса на награду
         # if self.position == 'long' and profit < 0:
         #     reward -= 0.1
@@ -543,7 +590,7 @@ def objective_sync(trial, train_df, test_df):
     try:
         logging.debug(f"Начало оптимизации trial {trial.number}")
         learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-3, log=True)
-        n_steps = trial.suggest_categorical('n_steps', [128, 256])
+        n_steps = trial.suggest_categorical('n_steps', [128, 256, 512])
         gamma = trial.suggest_float('gamma', 0.95, 0.99)
         
         ent_coef = trial.suggest_float('ent_coef', 1e-8, 1e-2, log=True)
@@ -594,8 +641,9 @@ def objective_sync(trial, train_df, test_df):
         env.close()
         test_env.close()
         logging.debug(f"Trial {trial.number} завершен с наградой {total_reward}")
-        model.save(f"{model_path}_rew_{round(float(total_reward),2)}")  
-        logging.debug(f"Модель Trial {trial.number} сохранена: {model_path}_rew_{total_reward}.zip")
+        model.save(f"{model_path}_{trial.number}_{round(float(total_reward),2)}")  
+        print(f"Модель Trial {trial.number} сохранена:  {model_path}_{trial.number}_{round(float(total_reward),2)}.zip")
+        logging.debug(f"Модель Trial {trial.number} сохранена: {model_path}_{trial.number}_{round(float(total_reward),2)}.zip")
         return total_reward
     except Exception as e:
         logging.error(f"Ошибка в trial {trial.number}: {e}\n", exc_info=True)
@@ -718,6 +766,9 @@ async def live_trading(async_exchange, model, symbol, norm_params, state):
         await asyncio.sleep(trading_interval)
 
 async def main():
+    # ---  Timer
+    start_time = time.time()
+    # Логирование в файл
     if LOGS_TO_FILE=="NEW":  
         clear_log_file(log_filename) # Удаляем логи предыдущего запука
     loop = asyncio.get_running_loop()
@@ -725,13 +776,14 @@ async def main():
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, shutdown_handler)
     async_exchange = ccxt_async.bybit(exchange_config)
-    if ACC_MODE == "DEMO":  
-        async_exchange.enable_demo_trading(True)  # Включаем режим демо-счета
+    
+    if ACC_MODE == "DEMO":  # Включаем режим демо-счета если нужно
+        async_exchange.enable_demo_trading(True)  
 
     # Получение баланса для проверки подключения
-    balance = await async_exchange.fetch_balance()
-    usdt_balance = balance["total"].get("USDT", 0)
-    logging.debug(f"Текущий баланс: {usdt_balance} USDT")   
+    # balance = await async_exchange.fetch_balance()
+    # usdt_balance = balance["total"].get("USDT", 0)
+    # logging.debug(f"Текущий баланс: {usdt_balance} USDT")   
     # await is_continue(async_exchange)
 
     executor = ThreadPoolExecutor()
@@ -743,11 +795,13 @@ async def main():
         model_path = f'{models_dir}/{symbol.replace("/", "_").split(":")[0]}'
         norm_path = f'{model_path}_norm.json'
 
-        if not await verify_symbol(async_exchange, symbol):
+        if not await verify_symbol(async_exchange, symbol, run_mode=RUN_MODE):
             logging.error(f"Символ {symbol} недоступен")
             return
         
-        df = await get_full_data(async_exchange, symbol, timeframe=TIMEFRAME, limit=GET_DATA_LIMIT)   # Изменено на '5m' 
+        df = await get_full_data(async_exchange, symbol, timeframe=TIMEFRAME, limit=GET_DATA_LIMIT, run_mode=RUN_MODE)   # Изменено на '5m' 
+        if log_level == "DEBUG":
+            await is_continue(exchange=async_exchange)
         if df is not None and not df.empty:
             df = add_technical_indicators(df)
             train_size = int(len(df) * 0.8)
@@ -769,34 +823,74 @@ async def main():
                     norm_params = json.load(f)
                 logging.info("Нормализованные параметры загружены успешно")
                 # logging.info(f"{norm_params=}")
-                model = PPO.load(model_path, device="cpu")
-                logging.info(f"Модель {model_path}.zip загружена успешно" )
+                print(f"{MODEL_FILE_SUFFIX=}")
+                if MODEL_FILE_SUFFIX:
+                    model = PPO.load(f"{model_path}{MODEL_FILE_SUFFIX}", device="cpu")
+                    print(f"Модель {model_path}{MODEL_FILE_SUFFIX}.zip загружена успешно")
+                else: 
+                    model = PPO.load(f"{model_path}", device="cpu")
+                    logging.info(f"Модель {model_path}.zip загружена успешно" )
+                    print(f"Модель {model_path}.zip загружена успешно")
+                    
                 # await is_continue(exchange=async_exchange)
 
-            if BK_DIR:  
-                file_path = create_file_path(symbol, timeframe=TIMEFRAME, data_dir=BK_DIR)  
-                logging.info(f"Для Бэктеста используется файл: {file_path}")
-                df = pd.read_csv(file_path)
-                mask = create_date_mask(df, start_date=BK_START, end_date=BK_END)  
-   
-                test_df = df[mask]
-                logging.info(f"Бэктест с {test_df["timestamp"].iloc[1]} по {test_df["timestamp"].iloc[-1]}")
+            if RUN_MODE == "BK":  
+                result_file_path = f"{STATS_DIR}/result.csv"
+                stats_file_path = f"{STATS_DIR}/stat.csv"
                 
-                # await is_continue(exchange=async_exchange)
-                
-                if test_df is not None and not test_df.empty:
-                    test_df = add_technical_indicators(test_df)
-                    test_df = test_df.reset_index(drop=True)
-                else:
-                    logging.error("Не удалось загрузить данные или данные пусты")
-                    await is_continue(exchange=async_exchange, exit=True)
-                # await is_continue(exchange=async_exchange)
+                for bk_start, bk_end, bk_period in zip(
+                                    BK_START.split(","), 
+                                    BK_END.split(","), 
+                                    BK_PERIOD.split(",")):
+                    renamed_result_file_path = f"{result_file_path.split('.')[0]}_{bk_period}.csv"
+                    renamed_stats_file_path = f"{stats_file_path.split('.')[0]}_{bk_period}.csv"
+                    mask = create_date_mask(df, start_date=bk_start, end_date=bk_end)  
+                    test_df = df[mask]
+                    logging.info(f"--------------- Бэктест с {test_df["timestamp"].iloc[1]} по {test_df["timestamp"].iloc[-1]}")
+                    # await is_continue(exchange=async_exchange)
+                    
+                    if test_df is not None and not test_df.empty:
+                        test_df = add_technical_indicators(test_df)
+                        test_df = test_df.reset_index(drop=True)
+                    else:
+                        logging.error("Не удалось загрузить данные или данные пусты")
+                        await is_continue(exchange=async_exchange, exit=True)
+                    if  log_level =="DEBUG":
+                        await is_continue(exchange=async_exchange)
+                        # norm_params = None
+                    await loop.run_in_executor(executor, backtest_model_sync, model, test_df, symbol, norm_params)
 
+                    if os.path.exists(result_file_path):
+                        try:
+                            os.rename(result_file_path, renamed_result_file_path )
+                            logging.info(f"Файл переименован: {result_file_path} -> {renamed_result_file_path}") 
+                            # Построение графика
+                            # Создаем частичную функцию с фиксированным именованным аргументом
+                            partial_plot_result = partial(plot_result, plt_show="save")
+                            # Передаем оставшиеся аргументы через run_in_executor
+                            await loop.run_in_executor(executor, partial_plot_result, renamed_result_file_path)
+                        except Exception as e:
+                            logging.error(f"Ошибка при переименовании {e}\n")
+                    else:
+                        logging.info(f"Файл {result_file_path} не существует, период {bk_period}")
+                        
+                    if os.path.exists(stats_file_path):
+                        try:    
+                            os.rename(stats_file_path, renamed_stats_file_path)
+                            logging.info(f"Файл переименован: {stats_file_path} -> {renamed_stats_file_path}")  
+                        except Exception as e:
+                            logging.error(f"Ошибка при переименовании {e}\n")    
+                    else:
+                        logging.error(f"Файл {stats_file_path} не существует, период {bk_period}")    
+                        
+                await is_continue(exchange=async_exchange, exit=True)
+            
+            logging.info("Running training Backtest")    
             await loop.run_in_executor(executor, backtest_model_sync, model, test_df, symbol, norm_params)
             await is_continue(exchange=async_exchange, exit=True)
+            
 
             if RUN_MODE == "TRADE_ONLY":
-
                 state = LiveTradingState(window_size=48)
                 last_20_data = test_df.tail(state.window_size)
                 initial_balance = await get_real_balance_async(async_exchange)
@@ -812,12 +906,31 @@ async def main():
     except Exception as e:
         logging.error(f"Ошибка в main: {e}\n", exc_info=True)
     finally:
-        await async_exchange.close()
-        executor.shutdown(wait=True)
-        logging.info("Обмен закрыт и исполнитель завершен")
+        if async_exchange:
+            try:
+                await async_exchange.close()
+                logging.info("Обмен закрыт")
+            except Exception as e:
+                logging.error(f"Ошибка при закрытии обмена: {e}\n", exc_info=True)
+        if executor:
+            try:
+                executor.shutdown(wait=True)
+                logging.info("Исполнитель завершен")
+            except Exception as e:
+                logging.error(f"Ошибка при завершении исполнителя: {e}\n", exc_info=True)
+        # ---  Timer
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Script completed in: {timedelta(seconds=elapsed_time)}")        
+        # await async_exchange.close()
+        # executor.shutdown(wait=True)
+        # logging.info("Обмен закрыт и исполнитель завершен")
 
 if __name__ == "__main__":
+    
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         logging.info("Программа прервана пользователем")
+        
+    

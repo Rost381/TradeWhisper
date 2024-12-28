@@ -3,6 +3,8 @@ import sys
 import os
 import asyncio
 import logging
+import argparse
+import logging
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
@@ -12,9 +14,19 @@ load_dotenv()
 
 
 DATA_DIR = os.getenv("DATA_DIR", "futures_data")
-MODEL_SUFFIX = os.getenv("MODEL_SUFFIX")
 
-
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description="Script for models processing."
+    )
+    parser.add_argument(
+        "suffix",
+        nargs="?",
+        type=str,
+        default="",
+        help="Suffix for the model (MODEL_SUFFIX).",
+    )
+    return parser.parse_args()
 
 async def is_continue(exchange, exit=False):
     """For correct exit. For Debug only"""
@@ -41,13 +53,19 @@ def create_file_path(symbol, timeframe, data_dir=DATA_DIR) -> str:  # type: igno
 
 
 # New fn with save df
-async def get_full_data(exchange, symbol, timeframe=None, since=None, limit=None):
+async def get_full_data(exchange, symbol, timeframe=None, since=None, limit=None, run_mode=None):
     return_limit = limit  # Количество возврашаемых свечей
-    all_ohlcv = []
-    logging.info(f"Начало получения данных для символа {symbol}")
-
+    all_ohlcv = []    
     file_path = create_file_path(symbol, timeframe)
-
+    if run_mode == "BK":
+        logging.info(f"Режим Бэктеста {symbol}")
+        if os.path.exists(file_path):
+            logging.info(f"Используется существующий файла {file_path}")
+            df = pd.read_csv(file_path)    
+            logging.info(f"Всего записей: {len(df)}.")
+            return df
+              
+    logging.info(f"Начало получения данных для символа {symbol}")
     # Создание директории, если её нет
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
@@ -167,7 +185,9 @@ async def list_available_symbols(exchange):
         return []
 
 
-async def verify_symbol(exchange, symbol):
+async def verify_symbol(exchange, symbol, run_mode=None):
+    if run_mode == "BK":
+        return True
     try:
         await exchange.load_markets()
         is_valid = symbol in exchange.symbols
@@ -180,7 +200,9 @@ async def verify_symbol(exchange, symbol):
         return False
 
 
-def get_real_balance_sync(exchange):
+def get_real_balance_sync(exchange, run_mode=None):
+    if run_mode != "TRADE":
+        return 10
     try:
         balance = asyncio.run(exchange.fetch_balance())
         real_balance = balance["total"].get("USDT", 0)
@@ -191,7 +213,9 @@ def get_real_balance_sync(exchange):
         return None
 
 
-async def get_real_balance_async(exchange):
+async def get_real_balance_async(exchange, run_mode=None):
+    if run_mode != "TRADE":
+        return 10
     try:
         balance = await exchange.fetch_balance()
         real_balance = balance["total"].get("USDT", 0)
@@ -245,7 +269,8 @@ def create_date_mask(df, start_date, end_date):
 def create_result_df(df, stat_dir):
     if df.empty:
         logging.error("DF is empty")
-        return None
+        return
+    
     def calculate_diff(row):
         if row["type"] == "long":
             return (
@@ -259,17 +284,31 @@ def create_result_df(df, stat_dir):
 
     # Применение функции для создания нового столбца
     df["diff_PCT"] = df.apply(calculate_diff, axis=1)
-    if not df.empty:
+    
+    df.dropna(inplace=True)
+    if len(df)  > 1 :
         df.to_csv(f"{stat_dir}/result.csv")
-        print(df)
     else:
-        print("No data to save")
+        logging.error("DF is empty, no data to save")
+        return
+
+
     # Рсчет статистики
     # df = df[: len(df)-1]
     # Метрики для расчёта
     # 1. Общее количество diff_PCT > 0.2 и процентное отношение к количеству сделок
     total_diff_pct_gt_0_2 = df[df["diff_PCT"] > 0.2].shape[0]
-    total_trades = df.shape[0]
+    # Всего сделок
+
+    total_trades = len(df)
+    
+    # Конечный баланс
+    end_balance = df["balance"].iloc[-1]
+    
+    if np.isnan(end_balance):
+        end_balance = df["balance"].iloc[-2]
+        total_trades = total_trades - 1
+    
     diff_pct_gt_0_2_ratio = (
         (total_diff_pct_gt_0_2 / total_trades * 100) if total_trades > 0 else 0
     )
@@ -331,21 +370,30 @@ def create_result_df(df, stat_dir):
     min_profit_short = short_trades["profit"].min() if not short_trades.empty else None
 
     # 7. Общее количество сделок
-    total_trades = len(df)
+    # total_trades = len(df)
 
     begin_ts = df["open_ts"].iloc[1]
     end_ts = df["close_ts"].iloc[-1]
+    if end_ts != end_ts:
+       end_ts = df["close_ts"].iloc[-2] 
 
     # Дополнительный расчет  статистики
     # Фильтруем сделки по типам
     long_trades = df[df["type"] == "long"]
     short_trades = df[df["type"] == "short"]
 
+    #Продолжительность сделок
+    max_duration_long = long_trades["duration"].max()
+    mean_duration_long = long_trades["duration"].mean()
+    max_duration_short = short_trades["duration"].max()
+    mean_duration_lshort = short_trades["duration"].mean()
+    
+
     # Расчет для сделок long
     total_long_profit = long_trades[long_trades["profit"] > 0]["profit"].sum()
     total_long_loss = long_trades[long_trades["profit"] < 0]["profit"].sum()
     long_profit_loss_ratio = (
-        (total_long_profit / abs(total_long_loss)) * 100
+        (total_long_profit / abs(total_long_loss))
         if total_long_loss != 0
         else float("inf")
     )
@@ -354,7 +402,7 @@ def create_result_df(df, stat_dir):
     total_short_profit = short_trades[short_trades["profit"] > 0]["profit"].sum()
     total_short_loss = short_trades[short_trades["profit"] < 0]["profit"].sum()
     short_profit_loss_ratio = (
-        (total_short_profit / abs(total_short_loss)) * 100
+        (total_short_profit / abs(total_short_loss))
         if total_short_loss != 0
         else float("inf")
     )
@@ -362,41 +410,49 @@ def create_result_df(df, stat_dir):
     # Разницы между прибыльными и убыточными сделками
     long_profit_loss_diff = total_long_profit + total_long_loss
     short_profit_loss_diff = total_short_profit + total_short_loss
+    
+    # Прибыль в %
+    end_profit_ratio = (end_balance - 10)*10
 
     # Итоговый DataFrame с результатами
     summary_df = pd.DataFrame(
         {
             "Metric": [
-                "start",
-                "Stop ",
+                "Start Date: ",
+                "Stop Date:  ",
                 # "Total diff_PCT > 0.2",
-                "Ratio positive profit to all trades (%)",
-                "Ratio positive profit to long trades (%)",
-                "Ratio positive profit to short trades (%)",
-                "Total positive trades",
-                "Total positive trades (long)",
-                "Total positive trades (short)",
+                "Ratio positive profit to all trades (%): ",
+                "Ratio positive profit to long trades (%): ",
+                "Ratio positive profit to short trades (%): ",
+                "Total positive trades: ",
+                "Total positive trades (long):  ",
+                "Total positive trades (short): ",
                 
-                "Total profit (long)",
-                "Total loss  (long)",
-                "Ratio (%) profit/loss (long)",
-                "PL (long)",
+                "Total profit (long): ",
+                "Total loss  (long): ",
+                "Ratio profit/loss (long): ",
+                "PL (long): ",
                 
-                "Total profit (short)",
-                "Total loss  (short)",
-                "Ratio (%) profit/loss (short)",             
-                "PL (short)",
+                "Total profit (short): ",
+                "Total loss  (short): ",
+                "Ratio profit/loss (short): ",             
+                "PL (short): ",
                 
             
-                
-                "Ratio diff_PCT > 0.2 to all trades (%)",
-                "Max profit trade",
-                "Min profit trade",
-                "Max profit trade (long)",
-                "Min profit trade (long)",
-                "Max profit trade (short)",
-                "Min profit trade (short)",
-                "Total Deals",
+                "Ratio diff_PCT > 0.2 to all trades (%): ",
+                "Max profit trade: ",
+                "Max loss trade: ",
+                "Max profit trade (long): ",
+                "Max loss trade (long): ",
+                "Max profit trade (short): ",
+                "Max loss trade (short): ",
+                "Max duration (long): ",
+                "Mean duration (long): ",
+                "Max duration  (short): ",
+                "Mean duration (short): ",
+                "Balance: ",
+                "Total Profit (%): ",
+                "Total Trades: ",
                 # "Total diff_PCT > 0.2 (long)",
                 # "Ratio diff_PCT > 0.2 to long trades (%)",
             ],
@@ -413,21 +469,27 @@ def create_result_df(df, stat_dir):
                 
                 total_long_profit,
                 total_long_loss,
-                round(long_profit_loss_ratio,2),
+                round(long_profit_loss_ratio, 2),
                 long_profit_loss_diff,
                 
                 total_short_profit,
                 total_short_loss,
-                round(short_profit_loss_ratio,2), 
+                round(short_profit_loss_ratio, 2), 
                 short_profit_loss_diff,
-                
-                round(diff_pct_gt_0_2_ratio,2),
+
+                round(diff_pct_gt_0_2_ratio, 2),
                 max_profit_trade,
                 min_profit_trade,
                 max_profit_long,
                 min_profit_long,
                 max_profit_short,
                 min_profit_short,
+                max_duration_long,
+                round(mean_duration_long, 2),
+                max_duration_short,
+                round(mean_duration_lshort, 2),
+                end_balance,
+                round(end_profit_ratio, 2),
                 total_trades,
                 # long_diff_pct_gt_0_2,
                 # long_diff_pct_gt_0_2_ratio,
@@ -441,4 +503,5 @@ def create_result_df(df, stat_dir):
         summary_df.to_csv(output_path, index=False)
         print(f"Summary saved to {output_path}")
     else:
-        print("No data to save")
+        logging.error("DF is empty, No data to save")
+    return

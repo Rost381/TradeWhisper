@@ -32,7 +32,8 @@ def find_sr_lines(df, dist=48):
     resistance_levels = df["high"].iloc[peaks]
     df["support"] = support_levels
     df["resistance"] = resistance_levels
-    df[["support", "resistance"]] = df[["support", "resistance"]].fillna(method="ffill")
+    # df[["support", "resistance"]] = df[["support", "resistance"]].fillna(method="ffill")
+    df[["support", "resistance"]] = df[["support", "resistance"]].ffill()
     return df
 
 
@@ -79,6 +80,7 @@ def calculate_rvi(df, window=10):
 
 # ------------------
 def add_technical_indicators_v0(df):
+    df = df.copy()
     logging.debug("Добавление технических индикаторов")
     df['atr'] = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14).average_true_range()
     df.bfill(inplace=True)
@@ -202,7 +204,8 @@ def add_technical_indicators_v3(df):
 
 # === Логика фракталов ===
     df = calculate_fractals(df, window=5)  # 5 свечей
-    df[["fractal_high", "fractal_low"]] = df[["fractal_high", "fractal_low"]].fillna(method="ffill")
+    # df[["fractal_high", "fractal_low"]] = df[["fractal_high", "fractal_low"]].fillna(method="ffill")
+    df[["fractal_high", "fractal_low"]] = df[["fractal_high", "fractal_low"]].ffill()
 
     df.dropna(inplace=True)
 
