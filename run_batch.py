@@ -1,8 +1,11 @@
 
 import asyncio
-import subprocess
-from itertools import product
 import os
+import subprocess
+import time
+from itertools import product
+from datetime import timedelta
+
 
 suffix_letter = ["L", #Long
                  "R", #Reward multiplier
@@ -21,26 +24,34 @@ combinations = [
     for combo in product(*ranges)
 ]
 
-print(combinations)
-print(len(combinations))
-# Вывод результата
+
 list_var = []
 dir_count = 0
 for combination in combinations:
     if os.path.exists(f"models_{combination}"):
-        dir_count += 1
-        list_var.append(combination)
+        if combination[:2] != "L0":
+            dir_count += 1
+            list_var.append(combination)
     
-print(dir_count)
-print(list_var)
-ds = set(combinations) - set(list_var)
-print(sorted(list(ds)))
+# print(dir_count)
+# print(list_var)
+ds = list(set(combinations) - set(list_var))
+# combinations = ds
+combinations = ["L0R1V1",
+                "L1R0V1",
+                "L2R1V1",
+                "L2R1V3",
+                "L4R0V0",
+                "L1R0V3",
+]
+print(f"{combinations=}")
 
-combinations = sorted(combinations)
+
+
 async def run_combination(combination):
-    """Запуск файла bk.py с параметром combination."""
+    """Запуск Main_wraper.py с параметром combination."""
     process = await asyncio.create_subprocess_exec(
-        "python", "bk.py", combination,
+        "python", "Main_wraper.py", combination,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE
     )
@@ -58,4 +69,13 @@ async def main():
 
 # Запуск основной программы
 if __name__ == "__main__":
+    print("Main running....")
+# ---  Timer
+    start_time = time.time()    
     asyncio.run(main())
+    print(f"Расчет для: {combinations}")
+    print(f"Количество: {len(combinations)}")
+    # ---  Timer
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"Script completed in: {timedelta(seconds=elapsed_time)}")      

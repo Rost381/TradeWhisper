@@ -79,6 +79,7 @@ def calculate_rvi(df, window=10):
     return rvi
 
 # ------------------
+# V0
 def add_technical_indicators_v0(df):
     df = df.copy()
     logging.debug("Добавление технических индикаторов")
@@ -89,7 +90,9 @@ def add_technical_indicators_v0(df):
     return df
 
 # ------------------
+# V1
 def add_technical_indicators_original(df):
+    df = df.copy()
     logging.debug("Добавление технических индикаторов")
     df['rsi'] = RSIIndicator(df['close'], window=14).rsi()
     df['ema20'] = trend.EMAIndicator(df['close'], window=20).ema_indicator()
@@ -120,7 +123,7 @@ def add_technical_indicators_original(df):
     logging.debug("Технические индикаторы добавлены")
     return df
 # ------------------
-
+# V2
 def add_technical_indicators_v2(df):
     logging.debug("Добавление технических индикаторов")
     df = df.copy()
@@ -170,7 +173,7 @@ def add_technical_indicators_v2(df):
 
     return df
 #-------------------------------------------------------------------
-# v2 Bill
+# V3 Bill Williams
 
 def add_technical_indicators_v3(df):
     logging.debug("Добавление технических индикаторов")

@@ -7,6 +7,7 @@ import argparse
 import logging
 import numpy as np
 import pandas as pd
+import json
 from dotenv import load_dotenv
 
 
@@ -45,11 +46,58 @@ async def is_continue(exchange, exit=False):
         sys.exit(0)
 
 
-def create_file_path(symbol, timeframe, data_dir=DATA_DIR) -> str:  # type: ignore
+def create_file_path(symbol, timeframe,  data_dir=DATA_DIR) -> str:  # type: ignore
     # Формирование имени файла
     symbol_filename = symbol.split("/")
     symbol_filename = symbol_filename[0] + symbol_filename[1][:4] + ".csv"
     return f"{data_dir}_{timeframe}/{symbol_filename}"
+
+def calc_norm_param(df, start_datet, data_limit):
+    df = df.copy()
+    """
+    Find the first row with the target date and calculate means and stds
+    for the previous 1800 rows.
+
+    Args:
+        df (pd.DataFrame): DataFrame with columns ['timestamp', 'open', 'high', 'low', 'close', 'volume'].
+        target_date (str): Target date in 'YYYY-MM-DD' format.
+
+    Returns:
+        dict: A dictionary with means and stds for the specified rows.
+    """
+    # Ensure timestamp column is datetime
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+    # Find the first row where the date matches the target_date
+    first_row_index = df[df['timestamp'].dt.date == pd.to_datetime(start_datet).date()].index.min()
+    
+    calc_data_limit = int(data_limit * 0.8)
+
+    if first_row_index is None or first_row_index < calc_data_limit:
+        raise ValueError("Insufficient data: not enough rows before the target date.")
+
+    # Select the 1800 rows before the target row
+    selected_data = df.iloc[first_row_index - calc_data_limit:first_row_index]
+    
+    # Удаление указанных столбцов
+    columns_to_drop = ['timestamp'] #, 'open', 'high', 'low', 'close', 'volume']
+    selected_data = selected_data.drop(columns=columns_to_drop, errors='ignore')
+    
+    # Calculate means and stds
+    
+    means = selected_data.mean()
+    stds = selected_data.std().replace(0, 1e-8)
+    
+    result = {
+        'means': means.to_dict(),
+        'stds': stds.to_dict()
+    }
+    
+    # result_json = json.dumps(result)
+
+    # Return the result as a dictionary
+    return result
+
 
 
 # New fn with save df
@@ -284,9 +332,11 @@ def create_result_df(df, stat_dir):
 
     # Применение функции для создания нового столбца
     df["diff_PCT"] = df.apply(calculate_diff, axis=1)
-    
     df.dropna(inplace=True)
-    if len(df)  > 1 :
+    # print(df)
+    # print(f"{len(df)=}")
+    # input('------')
+    if len(df)  >= 1 :
         df.to_csv(f"{stat_dir}/result.csv")
     else:
         logging.error("DF is empty, no data to save")
@@ -372,8 +422,8 @@ def create_result_df(df, stat_dir):
     # 7. Общее количество сделок
     # total_trades = len(df)
 
-    begin_ts = df["open_ts"].iloc[1]
-    end_ts = df["close_ts"].iloc[-1]
+    begin_ts = df["open_ts"].min()
+    end_ts = df["close_ts"].max()
     if end_ts != end_ts:
        end_ts = df["close_ts"].iloc[-2] 
 
@@ -499,6 +549,8 @@ def create_result_df(df, stat_dir):
 
     # Сохранение в файл CSV
     output_path = f"{stat_dir}/stat.csv"
+    # print(summary_df)
+    # input('------')
     if not summary_df.empty:
         summary_df.to_csv(output_path, index=False)
         print(f"Summary saved to {output_path}")

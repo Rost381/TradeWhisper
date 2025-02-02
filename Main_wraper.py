@@ -95,6 +95,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s",
     handlers=handlers,
 )
+logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
 
 if ACC_MODE == "LIVE":  
     API_KEY = os.getenv("API_KEY", None)
@@ -186,7 +187,7 @@ class TradingEnvironment(gym.Env):
         else:
             self.means = pd.Series(norm_params['means'])
             self.stds = pd.Series(norm_params['stds'])
-        self.normalized_data = (self.data - self.means) / self.stds
+        self.normalized_data = (self.data - self.means) / self.stds     
         low = self.normalized_data.min().values - 1
         high = self.normalized_data.max().values + 1
         num_features = self.data.shape[1]
@@ -819,9 +820,9 @@ async def main():
                 model, norm_params = await loop.run_in_executor(executor, get_or_train_model_sync, symbol, train_df, models_dir, best_params)
 
             if RUN_MODE == "TRADE_ONLY" or RUN_MODE == "BK":  # Сразу загружаем модель
-                with open(norm_path, 'r') as f:
-                    norm_params = json.load(f)
-                logging.info("Нормализованные параметры загружены успешно")
+                # with open(norm_path, 'r') as f:
+                #     norm_params = json.load(f)
+                # logging.info("Нормализованные параметры загружены успешно")
                 # logging.info(f"{norm_params=}")
                 print(f"{MODEL_FILE_SUFFIX=}")
                 if MODEL_FILE_SUFFIX:
@@ -844,9 +845,11 @@ async def main():
                                     BK_PERIOD.split(",")):
                     renamed_result_file_path = f"{result_file_path.split('.')[0]}_{bk_period}.csv"
                     renamed_stats_file_path = f"{stats_file_path.split('.')[0]}_{bk_period}.csv"
-                    mask = create_date_mask(df, start_date=bk_start, end_date=bk_end)  
+                    mask = create_date_mask(df, bk_start, bk_end)  
                     test_df = df[mask]
-                    logging.info(f"--------------- Бэктест с {test_df["timestamp"].iloc[1]} по {test_df["timestamp"].iloc[-1]}")
+                    logging.info(f"--------------- Бэктест {MODEL_SUFFIX} с {test_df["timestamp"].iloc[1]} по {test_df["timestamp"].iloc[-1]}, period: {bk_period.upper()}")
+                    if log_level == "ERROR":
+                        print(f"--------------- Бэктест {MODEL_SUFFIX} с {test_df["timestamp"].iloc[1]} по {test_df["timestamp"].iloc[-1]}, period: {bk_period.upper()} ")
                     # await is_continue(exchange=async_exchange)
                     
                     if test_df is not None and not test_df.empty:
@@ -857,7 +860,10 @@ async def main():
                         await is_continue(exchange=async_exchange, exit=True)
                     if  log_level =="DEBUG":
                         await is_continue(exchange=async_exchange)
-                        # norm_params = None
+                    # norm_params = None
+                    norm_params = calc_norm_param(df, bk_start, MODEL_WINDOWS_SIZE) #GET_DATA_LIMIT)
+                    print(norm_params)
+                    await is_continue(exchange=async_exchange)
                     await loop.run_in_executor(executor, backtest_model_sync, model, test_df, symbol, norm_params)
 
                     if os.path.exists(result_file_path):
@@ -872,7 +878,7 @@ async def main():
                         except Exception as e:
                             logging.error(f"Ошибка при переименовании {e}\n")
                     else:
-                        logging.info(f"Файл {result_file_path} не существует, период {bk_period}")
+                        logging.info(f"Файл {result_file_path} не существует, в период {bk_period} нет сделок  :(")
                         
                     if os.path.exists(stats_file_path):
                         try:    
@@ -881,12 +887,13 @@ async def main():
                         except Exception as e:
                             logging.error(f"Ошибка при переименовании {e}\n")    
                     else:
-                        logging.error(f"Файл {stats_file_path} не существует, период {bk_period}")    
+                        logging.error(f"Файл {stats_file_path} не существует, в период {bk_period} нет сделок  :(")    
                         
                 await is_continue(exchange=async_exchange, exit=True)
             
             logging.info("Running training Backtest")    
             await loop.run_in_executor(executor, backtest_model_sync, model, test_df, symbol, norm_params)
+            # Rename to "_default"
             await is_continue(exchange=async_exchange, exit=True)
             
 

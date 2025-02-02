@@ -3,6 +3,8 @@ import sys
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from matplotlib.font_manager import FontProperties
+from matplotlib import rcParams
 import matplotlib
 matplotlib.use('TkAgg') 
 
@@ -10,6 +12,7 @@ from mplfinance.original_flavor import candlestick_ohlc
 import mplcursors
 from dotenv import load_dotenv
 import argparse
+
 
 
 
@@ -47,6 +50,9 @@ if model_suffix_cmd:
 STATS_DIR = f"{STATS_DIR}_{MODEL_SUFFIX}"
 
 def plot_result(result_trades_path, plt_show=None):
+    rcParams['text.usetex'] = False
+    rcParams['font.family'] = 'DejaVu Sans'
+    rcParams['font.sans-serif'] = ['DejaVu Sans']
     # Загрузка данных
     candlesticks_paht = f"{DATA_DIR}_{TIMEFRAME}/DOGEUSDT.csv"
     candlesticks = pd.read_csv(candlesticks_paht, parse_dates=["timestamp"])
@@ -71,12 +77,19 @@ def plot_result(result_trades_path, plt_show=None):
         + price_min
     )
 
-
     # Настройка графика
     fig, ax1 = plt.subplots(figsize=(16, 8))
     ax2 = ax1.twinx()
     plt.rcParams.update({"font.size": FONT_SIZE})
 
+    #     # Устанавливаем шрифт DejaVu Sans
+    # # plt.rcParams['font.family'] = 'DejaVu Sans'
+    # FONT_FAMILY = 'DejaVu Sans'
+    # plt.rcParams.update({"font.family": FONT_FAMILY})
+    
+
+
+    
     # Форматирование дат на оси X
     ax1.xaxis.set_major_formatter(mdates.DateFormatter("%m.%d %H:%M"))
     ax1.xaxis.set_major_locator(mdates.AutoDateLocator())
